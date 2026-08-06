@@ -261,7 +261,6 @@ async function profileScreen(){
     <div class="card">
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="go('ranks')"><span><i class="ti ti-trophy" style="color:var(--gold);"></i> Leaderboard</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="historyScreen()"><span><i class="ti ti-history" style="color:var(--gold);"></i> Call History</span><span style="color:var(--mut2);">\u203A</span></div>
-      <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="chatScreen()"><span><i class="ti ti-users" style="color:var(--gold);"></i> Community Chat</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;display:flex;justify-content:space-between;cursor:pointer;" onclick="settingsScreen()"><span><i class="ti ti-settings" style="color:var(--gold);"></i> Settings</span><span style="color:var(--mut2);">\u203A</span></div>
     </div>`;
 }
@@ -275,13 +274,6 @@ async function historyScreen(){
   scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('profile')">\u2039 Profile</button><h2 style="margin-bottom:12px;">Call History</h2><div class="card">${rows}</div>`;
 }
 
-function chatScreen(){
-  document.getElementById("nav").style.display="flex";
-  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('profile')">\u2039 Profile</button>
-    <div class="center" style="padding-top:30px;"><div style="width:80px;height:80px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i class="ti ti-users" style="font-size:34px;color:var(--gold);"></i></div>
-    <h2>Community Chat</h2><div class="sub" style="max-width:250px;margin:8px 0 20px;">Plan sessions, share tips, and meet other learners in our group.</div>
-    <a href="${COMMUNITY_CHAT_URL}" target="_blank" style="text-decoration:none;width:100%;"><div class="btn btn-gold">Open community group</div></a></div>`;
-}
 
 function settingsScreen(){
   document.getElementById("nav").style.display="flex";
@@ -300,7 +292,6 @@ function settingsScreen(){
   document.getElementById("savebio").onclick=async()=>{await api("/setbio",{uid:UID,bio:document.getElementById("bio").value});document.getElementById("saved").textContent="Saved!";};
 }
 
-const COMMUNITY_CHAT_URL="https://t.me/UmrbekTeacher";
 go("speak");
 </script>
 </body>

@@ -27,27 +27,38 @@ from psycopg2.extras import RealDictCursor
 def get_db():
     return psycopg2.connect(DATABASE_URL)
 
+def _run(sql, params=None):
+    """Run one statement in its own connection so a failure can't poison others."""
+    if not DATABASE_URL: return
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); print("DB ERROR:", str(e)[:200], "| SQL:", sql[:80])
+    finally:
+        conn.close()
+
 def init_db():
     if not DATABASE_URL:
         print("WARNING: no DATABASE_URL"); return
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS sp_users (
-                uid TEXT PRIMARY KEY, name TEXT, photo_url TEXT, level TEXT DEFAULT 'beginner', bio TEXT DEFAULT '',
-                total_seconds INTEGER DEFAULT 0, total_calls INTEGER DEFAULT 0, likes_received INTEGER DEFAULT 0,
-                rating_sum INTEGER DEFAULT 0, rating_count INTEGER DEFAULT 0, last_seen DOUBLE PRECISION DEFAULT 0, joined TEXT)""")
-            cur.execute("""CREATE TABLE IF NOT EXISTS sp_calls (
-                id SERIAL PRIMARY KEY, uid TEXT, partner_uid TEXT, partner_name TEXT,
-                seconds INTEGER DEFAULT 0, level TEXT, ended_at TEXT)""")
-            for col, defn in [("bio","TEXT DEFAULT ''"),("last_seen","DOUBLE PRECISION DEFAULT 0")]:
-                try: cur.execute(f"ALTER TABLE sp_users ADD COLUMN IF NOT EXISTS {col} {defn}")
-                except: pass
-        conn.commit()
+    _run("""CREATE TABLE IF NOT EXISTS sp_users (
+        uid TEXT PRIMARY KEY, name TEXT, photo_url TEXT, level TEXT DEFAULT 'beginner', bio TEXT DEFAULT '',
+        total_seconds INTEGER DEFAULT 0, total_calls INTEGER DEFAULT 0, likes_received INTEGER DEFAULT 0,
+        rating_sum INTEGER DEFAULT 0, rating_count INTEGER DEFAULT 0, last_seen DOUBLE PRECISION DEFAULT 0, joined TEXT)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_calls (
+        id SERIAL PRIMARY KEY, uid TEXT, partner_uid TEXT, partner_name TEXT,
+        seconds INTEGER DEFAULT 0, level TEXT, ended_at TEXT)""")
+    _run("ALTER TABLE sp_users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''")
+    _run("ALTER TABLE sp_users ADD COLUMN IF NOT EXISTS last_seen DOUBLE PRECISION DEFAULT 0")
+    print("init_db complete")
 
 def upsert_user(uid, name, photo_url, level=None):
     if not DATABASE_URL: return
     k = str(uid); now = time.time(); today = time.strftime("%Y-%m-%d")
-    with get_db() as conn:
+    conn = get_db()
+    try:
         with conn.cursor() as cur:
             cur.execute("SELECT uid FROM sp_users WHERE uid=%s", (k,))
             if cur.fetchone():
@@ -59,6 +70,10 @@ def upsert_user(uid, name, photo_url, level=None):
                 cur.execute("INSERT INTO sp_users (uid,name,photo_url,level,last_seen,joined) VALUES (%s,%s,%s,%s,%s,%s)",
                             (k,name,photo_url,level or 'beginner',now,today))
         conn.commit()
+    except Exception as e:
+        conn.rollback(); print("upsert_user ERROR:", str(e)[:200])
+    finally:
+        conn.close()
 
 def set_level(uid, level):
     if not DATABASE_URL: return
@@ -89,28 +104,45 @@ def get_profile(uid):
             return _profile_row(row) if row else None
 
 def record_call(uid, partner_uid, partner_name, seconds, level):
-    if not DATABASE_URL or seconds < 3: return
+    if not DATABASE_URL or seconds < 3:
+        print(f"record_call skipped: seconds={seconds}"); return
     k = str(uid)
-    with get_db() as conn:
+    conn = get_db()
+    try:
         with conn.cursor() as cur:
             cur.execute("INSERT INTO sp_calls (uid,partner_uid,partner_name,seconds,level,ended_at) VALUES (%s,%s,%s,%s,%s,%s)",
                         (k,str(partner_uid),partner_name,seconds,level,time.strftime("%Y-%m-%d %H:%M")))
             cur.execute("UPDATE sp_users SET total_seconds=total_seconds+%s,total_calls=total_calls+1 WHERE uid=%s",(seconds,k))
         conn.commit()
+        print(f"record_call OK: uid={k} seconds={seconds}")
+    except Exception as e:
+        conn.rollback(); print("record_call ERROR:", str(e)[:200])
+    finally:
+        conn.close()
 
 def add_like(target_uid):
     if not DATABASE_URL: return
-    with get_db() as conn:
+    conn = get_db()
+    try:
         with conn.cursor() as cur:
             cur.execute("UPDATE sp_users SET likes_received=likes_received+1 WHERE uid=%s",(str(target_uid),))
-        conn.commit()
+        conn.commit(); print(f"add_like OK: {target_uid}")
+    except Exception as e:
+        conn.rollback(); print("add_like ERROR:", str(e)[:200])
+    finally:
+        conn.close()
 
 def add_rating(target_uid, stars):
     if not DATABASE_URL or not (1<=stars<=5): return
-    with get_db() as conn:
+    conn = get_db()
+    try:
         with conn.cursor() as cur:
             cur.execute("UPDATE sp_users SET rating_sum=rating_sum+%s,rating_count=rating_count+1 WHERE uid=%s",(stars,str(target_uid)))
-        conn.commit()
+        conn.commit(); print(f"add_rating OK: {target_uid} stars={stars}")
+    except Exception as e:
+        conn.rollback(); print("add_rating ERROR:", str(e)[:200])
+    finally:
+        conn.close()
 
 def get_call_history(uid, limit=20):
     if not DATABASE_URL: return []
