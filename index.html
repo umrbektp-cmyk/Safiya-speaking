@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>Safiya — Speaking Tutor</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.min.js"></script>
 <style>
   :root{--bg:#0f0f10;--card:#1a1a1c;--card2:#232326;--line:#2c2c30;--txt:#f2f2f2;--mut:#9a9a9f;--accent:#c9a84c;--accentbg:#2a2416;--green:#3ecf8e;--greenbg:#14291f;--red:#e05555;--redbg:#2a1414;}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
@@ -113,6 +114,26 @@ function noPartner(label,levelId){
   </div>`;
 }
 
+let lkRoom=null;
+
+async function connectVoice(room, statusEl){
+  try{
+    const r = await api("/token",{uid:UID,name:NAME,room:room});
+    if(!r.token){ if(statusEl) statusEl.textContent="🔇 Voice unavailable"; return; }
+    lkRoom = new LivekitClient.Room({ adaptiveStream:true, dynacast:true });
+    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{
+      if(track.kind==="audio"){ const a=track.attach(); a.autoplay=true; document.body.appendChild(a); }
+    });
+    await lkRoom.connect(r.url, r.token);
+    await lkRoom.localParticipant.setMicrophoneEnabled(true);
+    if(statusEl) statusEl.textContent="🎙 Voice connected — speak!";
+  }catch(e){
+    if(statusEl) statusEl.textContent="🔇 Mic blocked — allow microphone and retry";
+  }
+}
+
+function disconnectVoice(){ try{ if(lkRoom){ lkRoom.disconnect(); lkRoom=null; } }catch(e){} }
+
 function callScreen(label,room,partnerName){
   clearTimers();
   let q=Math.floor(Math.random()*QS.length);
@@ -128,20 +149,21 @@ function callScreen(label,room,partnerName){
       <div class="qtext">${QS[q]}</div>
       <button class="qbtn" id="nextq">↻ Next question</button>
     </div>
-    <div style="font-size:12px;color:var(--mut);text-align:center;margin:14px 0;">🔊 Voice connects here (next step). Room: <code style="font-size:11px;">${room}</code></div>
+    <div style="font-size:12px;color:var(--mut);text-align:center;margin:14px 0;" id="vstat">Connecting voice…</div>
     <div class="actions">
       <button class="skip" id="skip">⏭ Skip</button>
       <button class="end" id="end">✕ End</button>
     </div>`;
     document.getElementById("nextq").onclick=()=>{q=(q+1)%QS.length;render();};
-    document.getElementById("skip").onclick=async()=>{ await api("/skip",{uid:UID}); startSearch(label.toLowerCase().replace(/[- ]/g,"_"),label); };
-    document.getElementById("end").onclick=async()=>{ await api("/leave",{uid:UID}); levelScreen(); };
+    document.getElementById("skip").onclick=async()=>{ disconnectVoice(); await api("/skip",{uid:UID}); startSearch(levelIdFrom(label),label); };
+    document.getElementById("end").onclick=async()=>{ disconnectVoice(); await api("/leave",{uid:UID}); levelScreen(); };
     let s=0; countTimer=setInterval(()=>{s++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;},1000);
     statusTimer=setInterval(async()=>{
-      try{ const st=await api("/status",{uid:UID}); if(!st.active){ clearTimers(); partnerLeft(label,levelIdFrom(label)); } }catch(e){}
+      try{ const st=await api("/status",{uid:UID}); if(!st.active){ disconnectVoice(); clearTimers(); partnerLeft(label,levelIdFrom(label)); } }catch(e){}
     },2000);
   };
   render();
+  connectVoice(room, document.getElementById("vstat"));
 }
 
 function levelIdFrom(label){ return label.toLowerCase().replace(/[- ]/g,"_"); }

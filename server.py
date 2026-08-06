@@ -4,12 +4,30 @@
 Pairs two Telegram users at the same level. No database needed - in-memory queue.
 Voice is handled client-side by LiveKit; this server only does matchmaking + issues room tokens.
 """
-import os, time, threading
+import os, time, threading, jwt
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
+
+# ---- LiveKit config (set as Railway environment variables) ----
+LIVEKIT_URL    = os.environ.get("LIVEKIT_URL", "")
+LIVEKIT_KEY    = os.environ.get("LIVEKIT_KEY", "")
+LIVEKIT_SECRET = os.environ.get("LIVEKIT_SECRET", "")
+
+def make_token(identity, name, room):
+    """Create a LiveKit access token for a user to join a room."""
+    now = int(time.time())
+    claims = {
+        "iss": LIVEKIT_KEY,
+        "sub": identity,
+        "name": name,
+        "nbf": now,
+        "exp": now + 3600,
+        "video": {"room": room, "roomJoin": True, "canPublish": True, "canSubscribe": True},
+    }
+    return jwt.encode(claims, LIVEKIT_SECRET, algorithm="HS256")
 
 # ---- in-memory state ----
 # waiting[level] = list of {uid, name, ts}
@@ -92,6 +110,21 @@ def poll():
             m = matches[uid]
             return jsonify(matched=True, partner_name=m["partner_name"], room=m["room"])
         return jsonify(matched=False)
+
+
+@app.route("/token", methods=["POST"])
+def token():
+    """Issue a LiveKit join token for a user's current room."""
+    d = request.get_json(force=True)
+    uid = str(d.get("uid", "")).strip()
+    name = (d.get("name") or "Student").strip()
+    room = (d.get("room") or "").strip()
+    if not uid or not room:
+        return jsonify(error="missing uid or room"), 400
+    if not LIVEKIT_KEY or not LIVEKIT_SECRET:
+        return jsonify(error="livekit not configured"), 500
+    tk = make_token(uid, name, room)
+    return jsonify(token=tk, url=LIVEKIT_URL)
 
 
 @app.route("/status", methods=["POST"])
