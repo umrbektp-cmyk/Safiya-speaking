@@ -3,198 +3,227 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Safiya — Speaking Tutor</title>
+<title>Safiya Speaking</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.5.7/dist/livekit-client.umd.min.js"></script>
 <style>
-  :root{--bg:#0f0f10;--card:#1a1a1c;--card2:#232326;--line:#2c2c30;--txt:#f2f2f2;--mut:#9a9a9f;--accent:#c9a84c;--accentbg:#2a2416;--green:#3ecf8e;--greenbg:#14291f;--red:#e05555;--redbg:#2a1414;}
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;}
-  .wrap{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
-  .scr{flex:1;padding:24px 20px;display:flex;flex-direction:column;}
-  h1{font-size:19px;font-weight:600;margin-bottom:4px;}
-  .sub{font-size:13px;color:var(--mut);margin-bottom:22px;}
-  .lvl{display:flex;flex-direction:column;gap:10px;}
-  .lvl button{text-align:left;padding:15px 16px;border-radius:12px;font-size:15px;font-weight:500;background:var(--card);color:var(--txt);border:1px solid var(--line);cursor:pointer;transition:.15s;}
-  .lvl button:active{transform:scale(.98);background:var(--card2);}
-  .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;}
-  .circle{width:100px;height:100px;border-radius:50%;background:var(--accentbg);display:flex;align-items:center;justify-content:center;margin-bottom:18px;}
-  .circle svg{width:40px;height:40px;stroke:var(--accent);}
-  .big{font-size:21px;font-weight:600;}
-  .timer{font-size:32px;font-weight:600;margin:16px 0;font-variant-numeric:tabular-nums;}
-  .btn{padding:12px 30px;border-radius:12px;font-size:15px;font-weight:500;background:var(--card);color:var(--txt);border:1px solid var(--line);cursor:pointer;}
+  :root{--bg:#faf7f0;--card:#ffffff;--line:#efe8d6;--line2:#e8dfc8;--navy:#1a2b4a;--gold:#d4af37;--goldbg:#f5ecd0;--golddk:#8a6d1b;--mut:#8a8266;--mut2:#b0a780;--green:#1d9e75;--red:#a32d2d;--redbg:#fbeaea;}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  body{background:var(--bg);color:var(--navy);min-height:100vh;}
+  .wrap{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding-bottom:64px;}
+  .top{background:var(--card);padding:12px 16px;border-bottom:1px solid var(--line);text-align:center;position:sticky;top:0;z-index:10;}
+  .top .t{font-size:15px;font-weight:600;color:var(--navy);}
+  .top .s{font-size:10px;color:var(--mut2);}
+  .scr{flex:1;padding:22px 18px;}
+  h2{font-size:18px;font-weight:600;margin-bottom:4px;}
+  .sub{font-size:13px;color:var(--mut);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;}
+  .btn{padding:13px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--navy);text-align:center;width:100%;}
   .btn:active{transform:scale(.98);}
-  .row{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
-  .av{width:44px;height:44px;border-radius:50%;background:var(--greenbg);color:var(--green);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:17px;}
-  .qcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:auto;}
-  .qlabel{font-size:11px;letter-spacing:.05em;color:var(--mut);margin-bottom:8px;}
-  .qtext{font-size:17px;line-height:1.5;}
-  .qbtn{margin-top:14px;padding:9px 16px;border-radius:10px;font-size:13px;background:var(--card2);color:var(--txt);border:1px solid var(--line);cursor:pointer;}
-  .actions{display:flex;gap:10px;margin-top:20px;}
-  .actions button{flex:1;padding:15px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);}
-  .skip{background:var(--card);color:var(--txt);}
-  .end{background:var(--redbg);color:var(--red);border-color:#3a1c1c;}
-  .mic{margin-left:auto;font-size:13px;color:var(--mut);}
+  .btn-gold{background:var(--gold);color:#fff;border:none;}
+  .btn-red{background:var(--redbg);color:var(--red);border:1px solid #eecaca;}
+  .av{border-radius:50%;background:var(--navy);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:600;overflow:hidden;}
+  .av img{width:100%;height:100%;object-fit:cover;}
+  .lvlbadge{display:inline-block;background:var(--goldbg);color:var(--golddk);font-size:12px;padding:3px 12px;border-radius:20px;}
+  .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:var(--card);border-top:1px solid var(--line);}
+  .nav div{flex:1;text-align:center;padding:9px 0;color:var(--mut2);cursor:pointer;font-size:10px;}
+  .nav div.on{color:var(--gold);}
+  .nav i{font-size:20px;display:block;}
+  .center{display:flex;flex-direction:column;align-items:center;text-align:center;}
+  .row{display:flex;align-items:center;gap:12px;}
+  .tab{flex:1;text-align:center;padding:7px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--mut);}
+  .tab.on{background:var(--gold);color:#fff;border:none;font-weight:600;}
+  .star{cursor:pointer;font-size:32px;color:#e0d6b8;}
+  .star.on{color:var(--gold);}
   .err{color:var(--red);font-size:13px;text-align:center;margin-top:10px;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" onerror="" ></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
 </head>
 <body>
-<div class="wrap"><div class="scr" id="scr"></div></div>
+<div class="wrap">
+  <div class="top"><div class="t">Safiya Speaking</div><div class="s">by Umrbek TP</div></div>
+  <div class="scr" id="scr"></div>
+</div>
+<div class="nav" id="nav">
+  <div data-tab="speak" class="on" onclick="go('speak')"><i class="ti ti-microphone"></i>Speak</div>
+  <div data-tab="ranks" onclick="go('ranks')"><i class="ti ti-trophy"></i>Ranks</div>
+  <div data-tab="profile" onclick="go('profile')"><i class="ti ti-user"></i>Profile</div>
+</div>
 <script>
-// ---- CONFIG: set this to your Railway backend URL after deploy ----
 const API = window.__API__ || location.origin;
-
 const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-if (tg) { tg.ready(); tg.expand(); }
-
-// user id + name from Telegram (fallback to a random guest for browser testing)
+if(tg){ tg.ready(); tg.expand(); }
 const U = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
-let _gid = null;
-try { _gid = localStorage.getItem("sp_guest"); if(!_gid){ _gid = "guest_"+Math.random().toString(36).slice(2,8); localStorage.setItem("sp_guest",_gid);} } catch(e){ _gid = "guest_"+Math.random().toString(36).slice(2,8); }
+let _gid=null; try{_gid=localStorage.getItem("sp_guest");if(!_gid){_gid="guest_"+Math.random().toString(36).slice(2,8);localStorage.setItem("sp_guest",_gid);}}catch(e){_gid="guest_"+Math.random().toString(36).slice(2,8);}
 const UID = U ? String(U.id) : _gid;
-const NAME = U ? (U.first_name || "Student") : "Guest";
+const NAME = U ? [U.first_name,U.last_name].filter(Boolean).join(" ") : "Guest";
+const PHOTO = U && U.photo_url ? U.photo_url : "";
 
-const LEVELS = [["beginner","Beginner"],["elementary","Elementary"],["pre_intermediate","Pre-Intermediate"],["intermediate","Intermediate"],["advanced","Advanced"]];
-const QS = ["What did you do last weekend?","Do you prefer the city or the countryside? Why?","What's a skill you'd like to learn, and why?","Describe your favourite meal in detail.","Is social media good or bad for society?","If you had a free day tomorrow, what would you do?","What kind of music do you enjoy?","Tell me about a place you'd love to visit."];
+const LEVELS=[["beginner","Beginner"],["elementary","Elementary"],["pre_intermediate","Pre-Intermediate"],["intermediate","Intermediate"],["advanced","Advanced"]];
+const QS=["What did you do last weekend?","Do you prefer the city or the countryside? Why?","What's a skill you'd like to learn, and why?","Describe your favourite meal in detail.","Is social media good or bad for society?","If you had a free day tomorrow, what would you do?","What kind of music do you enjoy?","Tell me about a place you'd love to visit.","Has your hometown changed much in recent years?","What's the best film you've seen lately?"];
 
-const scr = document.getElementById("scr");
-let pollTimer=null, countTimer=null, searchTimer=null, statusTimer=null;
+const scr=document.getElementById("scr");
+let pollTimer=null,countTimer=null,statusTimer=null,lkRoom=null,callSeconds=0,callLiked=false;
+function clearTimers(){[pollTimer,countTimer,statusTimer].forEach(t=>t&&clearInterval(t));pollTimer=countTimer=statusTimer=null;}
+async function api(p,b){const r=await fetch(API+p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});return r.json();}
+function avatar(name,photo,size){const s=size||44;const inner=photo?`<img src="${photo}"/>`:(name||"?")[0].toUpperCase();return `<div class="av" style="width:${s}px;height:${s}px;font-size:${Math.round(s*0.4)}px;">${inner}</div>`;}
+function fmt(sec){const m=Math.floor(sec/60),s=sec%60;return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;}
+function lvlName(l){return (l||"").replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());}
 
-function clearTimers(){ [pollTimer,countTimer,searchTimer,statusTimer].forEach(t=>t&&clearInterval(t)); pollTimer=countTimer=searchTimer=statusTimer=null; }
-
-async function api(path, body){
-  const r = await fetch(API + path, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  return r.json();
+function go(tab){
+  clearTimers();
+  document.querySelectorAll(".nav div").forEach(d=>d.classList.toggle("on",d.dataset.tab===tab));
+  document.getElementById("nav").style.display="flex";
+  if(tab==="speak") speakHome();
+  else if(tab==="ranks") ranksScreen();
+  else if(tab==="profile") profileScreen();
 }
 
-function levelScreen(){
+function speakHome(){
   clearTimers();
-  scr.innerHTML = `<h1>Find a speaking partner</h1><div class="sub">Pick your level to get matched with another student</div><div class="lvl" id="lv"></div>`;
-  const box = document.getElementById("lv");
-  LEVELS.forEach(([id,label])=>{
-    const b=document.createElement("button");
-    b.textContent = label;
-    b.onclick=()=>startSearch(id,label);
-    box.appendChild(b);
-  });
-}
-
-async function startSearch(levelId, label){
-  clearTimers();
-  scr.innerHTML = `<div class="center">
-    <div class="circle"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></div>
-    <div class="big">Finding a partner…</div>
-    <div class="sub" style="max-width:230px;margin:6px 0 0;">Looking for someone at ${label} level to practice with</div>
-    <div class="timer" id="tmr">2:00</div>
-    <button class="btn" id="cancel">Cancel</button>
-    <div class="err" id="err"></div>
+  scr.innerHTML=`<div class="center" style="padding-top:20px;">
+    <div style="width:120px;height:120px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin:20px 0 18px;border:2px solid var(--gold);">
+      <div style="width:80px;height:80px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;"><i class="ti ti-microphone" style="font-size:34px;color:#fff;"></i></div>
+    </div>
+    <h2>Tap to start talking</h2>
+    <div class="sub" style="max-width:220px;margin-top:6px;">We'll match you with a partner at your level</div>
+    <div style="width:100%;margin-top:28px;"><div class="sub" style="margin-bottom:8px;">Choose your level</div><div id="lv" style="display:flex;flex-direction:column;gap:9px;"></div></div>
   </div>`;
-  document.getElementById("cancel").onclick = ()=>{ api("/leave",{uid:UID}); levelScreen(); };
+  const box=document.getElementById("lv");
+  LEVELS.forEach(([id,label])=>{const b=document.createElement("button");b.className="btn";b.style.textAlign="left";b.innerHTML=`<i class="ti ti-microphone" style="color:var(--gold);margin-right:8px;"></i>${label}`;b.onclick=()=>startSearch(id,label);box.appendChild(b);});
+}
 
-  let res;
-  try { res = await api("/join",{uid:UID,name:NAME,level:levelId}); }
-  catch(e){ document.getElementById("err").textContent="Connection error. Try again."; return; }
-
-  if(res.matched){ return callScreen(label,res.room,res.partner_name); }
-
-  // countdown + poll for a match
-  let t=120; const tmr=document.getElementById("tmr");
-  countTimer=setInterval(()=>{ t--; if(!document.getElementById("tmr")){clearInterval(countTimer);return;} tmr.textContent=`${Math.floor(t/60)}:${String(t%60).padStart(2,"0")}`; if(t<=0){ clearTimers(); api("/leave",{uid:UID}); noPartner(label,levelId);} },1000);
-  pollTimer=setInterval(async()=>{
-    try{ const p=await api("/poll",{uid:UID}); if(p.matched){ clearTimers(); callScreen(label,p.room,p.partner_name);} }catch(e){}
-  },1500);
+async function startSearch(levelId,label){
+  clearTimers();
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<div class="center" style="padding-top:60px;">
+    <div style="width:96px;height:96px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:18px;"><i class="ti ti-search" style="font-size:36px;color:var(--gold);"></i></div>
+    <h2>Finding a partner…</h2><div class="sub" id="qmsg" style="max-width:230px;margin-top:6px;">Looking for someone at ${label} level</div>
+    <div style="font-size:30px;font-weight:600;margin:18px 0;" id="tmr">2:00</div>
+    <button class="btn" style="width:auto;padding:10px 28px;" onclick="api('/leave',{uid:UID});go('speak')">Cancel</button>
+    <div class="err" id="err"></div></div>`;
+  let res; try{res=await api("/join",{uid:UID,name:NAME,photo:PHOTO,level:levelId});}catch(e){document.getElementById("err").textContent="Connection error. Try again.";return;}
+  if(res.matched) return callScreen(res);
+  if(res.queue_pos>1) document.getElementById("qmsg").textContent="You're next — waiting for someone to free up";
+  let t=120;const tmr=document.getElementById("tmr");
+  countTimer=setInterval(()=>{t--;if(!document.getElementById("tmr")){clearInterval(countTimer);return;}tmr.textContent=`${Math.floor(t/60)}:${String(t%60).padStart(2,"0")}`;if(t<=0){clearTimers();api("/leave",{uid:UID});noPartner(label,levelId);}},1000);
+  pollTimer=setInterval(async()=>{try{const p=await api("/poll",{uid:UID});if(p.matched){clearTimers();callScreen(p);}}catch(e){}},1500);
 }
 
 function noPartner(label,levelId){
-  scr.innerHTML=`<div class="center">
-    <div class="circle"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg></div>
-    <div class="big">No one's here yet</div>
-    <div class="sub" style="max-width:240px;margin:6px 0 14px;">No ${label} partner available right now. Try again in a bit!</div>
-    <button class="btn" onclick="location.reload()" style="margin-bottom:10px;">Try again</button>
-  </div>`;
+  scr.innerHTML=`<div class="center" style="padding-top:70px;">
+    <div style="width:96px;height:96px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i class="ti ti-clock" style="font-size:34px;color:var(--gold);"></i></div>
+    <h2>No one's here yet</h2><div class="sub" style="max-width:240px;margin:6px 0 16px;">No ${label} partner right now. Try again in a bit.</div>
+    <button class="btn" style="width:auto;padding:11px 26px;margin-bottom:8px;" onclick="startSearch('${levelId}','${label}')">Try again</button>
+    <button class="btn" style="width:auto;padding:11px 26px;border:none;color:var(--mut);" onclick="go('speak')">Back</button></div>`;
 }
 
-let lkRoom=null;
-
-async function connectVoice(room, statusEl, micBtn){
-  try{
-    // Ask for mic first — this is what triggers the browser prompt
-    await navigator.mediaDevices.getUserMedia({audio:true});
-  }catch(e){
-    if(statusEl) statusEl.textContent="🔇 Microphone blocked. Tap the button to allow.";
-    if(micBtn){ micBtn.style.display="inline-block"; micBtn.onclick=()=>connectVoice(room,statusEl,micBtn); }
-    return;
-  }
-  try{
-    const r = await api("/token",{uid:UID,name:NAME,room:room});
-    if(!r.token){ if(statusEl) statusEl.textContent="🔇 Voice unavailable"; return; }
-    if(micBtn) micBtn.style.display="none";
-    lkRoom = new LivekitClient.Room({ adaptiveStream:true, dynacast:true });
-    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{
-      if(track.kind==="audio"){ const a=track.attach(); a.autoplay=true; document.body.appendChild(a); }
-    });
-    await lkRoom.connect(r.url, r.token);
-    await lkRoom.localParticipant.setMicrophoneEnabled(true);
-    if(statusEl) statusEl.textContent="🎙 Voice connected — speak!";
-  }catch(e){
-    if(statusEl) statusEl.textContent="🔇 Voice error. Tap to retry.";
-    if(micBtn){ micBtn.style.display="inline-block"; micBtn.onclick=()=>connectVoice(room,statusEl,micBtn); }
-  }
-}
-
-function disconnectVoice(){ try{ if(lkRoom){ lkRoom.disconnect(); lkRoom=null; } }catch(e){} }
-
-function callScreen(label,room,partnerName){
-  clearTimers();
+function callScreen(m){
+  clearTimers();callSeconds=0;callLiked=false;
+  document.getElementById("nav").style.display="none";
+  const label=lvlName(m.partner_level);
   let q=Math.floor(Math.random()*QS.length);
   const render=()=>{
-    scr.innerHTML=`
-    <div class="row">
-      <div class="av">${(partnerName||"P")[0].toUpperCase()}</div>
-      <div><div style="font-size:15px;font-weight:600;">Connected · ${partnerName||"Partner"}</div><div style="font-size:12px;color:var(--green);">● ${label} · live</div></div>
-      <div class="mic" id="ct">00:00</div>
-    </div>
-    <div class="qcard">
-      <div class="qlabel">TALK ABOUT</div>
-      <div class="qtext">${QS[q]}</div>
-      <button class="qbtn" id="nextq">↻ Next question</button>
-    </div>
-    <div style="text-align:center;margin:14px 0;">
-      <button class="qbtn" id="micbtn" style="display:none;">🎙 Enable microphone</button>
-      <div style="font-size:12px;color:var(--mut);margin-top:6px;" id="vstat">Connecting voice…</div>
-    </div>
-    <div class="actions">
-      <button class="skip" id="skip">⏭ Skip</button>
-      <button class="end" id="end">✕ End</button>
-    </div>`;
+    scr.innerHTML=`<div class="center">
+      <div style="position:relative;margin-bottom:10px;">${avatar(m.partner_name,m.partner_photo,84)}<span style="position:absolute;bottom:4px;right:4px;width:16px;height:16px;background:var(--green);border:3px solid var(--bg);border-radius:50%;"></span></div>
+      <h2>${m.partner_name}</h2><div class="lvlbadge" style="margin-top:6px;">${label}</div>
+      <div style="font-size:15px;color:var(--green);font-weight:600;margin-top:10px;" id="ct">00:00</div></div>
+    <div class="card" style="padding:16px;margin-top:20px;">
+      <div style="font-size:10px;letter-spacing:.08em;color:var(--mut2);margin-bottom:6px;">TALK ABOUT</div>
+      <div style="font-size:15px;line-height:1.5;">${QS[q]}</div>
+      <button class="btn" style="width:auto;padding:8px 14px;font-size:13px;margin-top:12px;" id="nextq"><i class="ti ti-refresh"></i> Next question</button></div>
+    <div style="font-size:12px;color:var(--mut);text-align:center;margin:14px 0;" id="vstat">Connecting voice…</div>
+    <div class="center" style="margin:6px 0 14px;"><button id="likebtn" style="background:none;border:none;cursor:pointer;color:var(--mut2);font-size:13px;"><i class="ti ti-heart" style="font-size:26px;display:block;margin-bottom:2px;"></i>Like partner</button></div>
+    <div class="row" style="gap:10px;">
+      <button class="btn" id="skip"><i class="ti ti-player-skip-forward"></i> Skip</button>
+      <button class="btn btn-red" id="end"><i class="ti ti-phone-off"></i> End</button></div>`;
     document.getElementById("nextq").onclick=()=>{q=(q+1)%QS.length;render();};
-    document.getElementById("skip").onclick=async()=>{ disconnectVoice(); await api("/skip",{uid:UID}); startSearch(levelIdFrom(label),label); };
-    document.getElementById("end").onclick=async()=>{ disconnectVoice(); await api("/leave",{uid:UID}); levelScreen(); };
-    let s=0; countTimer=setInterval(()=>{s++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;},1000);
-    statusTimer=setInterval(async()=>{
-      try{ const st=await api("/status",{uid:UID}); if(!st.active){ disconnectVoice(); clearTimers(); partnerLeft(label,levelIdFrom(label)); } }catch(e){}
-    },2000);
+    document.getElementById("likebtn").onclick=async(e)=>{if(!callLiked){callLiked=true;await api("/like",{uid:UID});const b=document.getElementById("likebtn");b.style.color="var(--gold)";b.innerHTML=`<i class="ti ti-heart-filled" style="font-size:26px;display:block;margin-bottom:2px;color:var(--gold);"></i>Liked`;}};
+    document.getElementById("skip").onclick=async()=>{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds,like:callLiked});startSearch(m.partner_level,label);};
+    document.getElementById("end").onclick=async()=>{disconnectVoice();clearTimers();await api("/end",{uid:UID,seconds:callSeconds,like:callLiked});ratingScreen(m);};
+    countTimer=setInterval(()=>{callSeconds++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
+    statusTimer=setInterval(async()=>{try{const st=await api("/status",{uid:UID});if(!st.active){disconnectVoice();clearTimers();ratingScreen(m,true);}}catch(e){}},2500);
   };
   render();
-  connectVoice(room, document.getElementById("vstat"), document.getElementById("micbtn"));
+  connectVoice(m.room,()=>document.getElementById("vstat"));
 }
 
-function levelIdFrom(label){ return label.toLowerCase().replace(/[- ]/g,"_"); }
+async function connectVoice(room,statusFn){
+  const setStat=(t)=>{const e=statusFn&&statusFn();if(e)e.textContent=t;};
+  try{await navigator.mediaDevices.getUserMedia({audio:true});}
+  catch(e){setStat("🔇 Tap End then reopen and allow microphone");return;}
+  try{
+    const r=await api("/token",{uid:UID,name:NAME,room:room});
+    if(!r.token){setStat("Voice unavailable");return;}
+    lkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
+    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{if(track.kind==="audio"){const a=track.attach();a.autoplay=true;document.body.appendChild(a);}});
+    await lkRoom.connect(r.url,r.token);
+    await lkRoom.localParticipant.setMicrophoneEnabled(true);
+    setStat("🎙 Voice connected — speak!");
+  }catch(e){setStat("Voice error — try Skip");}
+}
+function disconnectVoice(){try{if(lkRoom){lkRoom.disconnect();lkRoom=null;}}catch(e){}}
 
-function partnerLeft(label,levelId){
-  clearTimers();
-  scr.innerHTML=`<div class="center">
-    <div class="circle"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
-    <div class="big">Partner left</div>
-    <div class="sub" style="max-width:240px;margin:6px 0 16px;">Your partner ended the call. Find a new one?</div>
-    <button class="btn" id="again" style="margin-bottom:10px;">Find new partner</button>
-    <button class="btn" id="home" style="background:transparent;border:none;color:var(--mut);">Back to levels</button>
-  </div>`;
-  document.getElementById("again").onclick=()=>startSearch(levelId,label);
-  document.getElementById("home").onclick=levelScreen;
+function ratingScreen(m,partnerLeft){
+  clearTimers();document.getElementById("nav").style.display="none";
+  let stars=0;
+  scr.innerHTML=`<div class="center" style="padding-top:24px;">
+    ${avatar(m.partner_name,m.partner_photo,80)}
+    <div style="font-size:16px;margin-top:14px;">${partnerLeft?"Your partner left":"You talked with"}</div>
+    <h2 style="margin-top:2px;">${m.partner_name}</h2>
+    <div class="sub" style="margin-bottom:22px;">${fmt(callSeconds)} · ${lvlName(m.partner_level)}</div>
+    <div class="sub" style="margin-bottom:12px;">How was your partner?</div>
+    <div id="stars" style="display:flex;gap:8px;margin-bottom:20px;"></div>
+    <button class="btn btn-gold" id="submit" style="margin-bottom:10px;">Submit & find next</button>
+    <button class="btn" style="border:none;color:var(--mut);" onclick="go('speak')">Back to home</button></div>`;
+  const sb=document.getElementById("stars");
+  for(let i=1;i<=5;i++){const s=document.createElement("i");s.className="ti ti-star star";s.onclick=()=>{stars=i;[...sb.children].forEach((c,idx)=>c.classList.toggle("on",idx<i));};sb.appendChild(s);}
+  document.getElementById("submit").onclick=async()=>{if(stars>0){await api("/end",{uid:UID,seconds:0,stars:stars});}startSearch(m.partner_level,lvlName(m.partner_level));};
 }
 
-levelScreen();
+async function ranksScreen(){
+  scr.innerHTML=`<h2>Leaderboard</h2><div class="sub">Top speakers this community</div>
+    <div class="row" style="gap:6px;margin:16px 0;"><div class="tab on" data-k="minutes" onclick="loadBoard('minutes',this)">Top speakers</div><div class="tab" data-k="likes" onclick="loadBoard('likes',this)">Most liked</div><div class="tab" data-k="rating" onclick="loadBoard('rating',this)">Top rated</div></div>
+    <div id="board"><div class="sub" style="text-align:center;padding:30px;">Loading…</div></div>`;
+  loadBoard("minutes");
+}
+async function loadBoard(kind,el){
+  if(el){document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t===el));}
+  const board=document.getElementById("board");board.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">Loading…</div>`;
+  let res;try{res=await api("/leaderboard",{kind:kind});}catch(e){board.innerHTML=`<div class="err">Couldn't load</div>`;return;}
+  const rows=res.board||[];
+  if(!rows.length){board.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">No one's on the board yet. Start a call to get ranked.</div>`;return;}
+  const medal=["🥇","🥈","🥉"];
+  const val=(r)=>kind==="minutes"?`${r.minutes} min`:kind==="likes"?`${r.likes_received} ❤`:`${r.avg_rating||"—"} ★`;
+  board.innerHTML=rows.map((r,i)=>{
+    const top=i<3;
+    return `<div class="row" style="padding:11px 12px;${top?'background:var(--card);border:'+(i===0?'2px':'1px')+' solid '+(i===0?'var(--gold)':'var(--line2)')+';border-radius:12px;margin-bottom:8px;':''}">
+      <div style="width:26px;text-align:center;font-size:${top?18:13}px;color:var(--mut);">${top?medal[i]:i+1}</div>
+      ${avatar(r.name,r.photo_url,top?36:32)}
+      <div style="flex:1;font-size:14px;font-weight:${top?600:400};color:var(--navy);">${r.name||"Learner"}</div>
+      <div style="font-size:14px;font-weight:600;color:var(--navy);">${val(r)}</div></div>`;
+  }).join("");
+}
+
+async function profileScreen(){
+  scr.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">Loading…</div>`;
+  let res;try{res=await api("/profile",{uid:UID});}catch(e){}
+  const p=(res&&res.profile)||{name:NAME,minutes:0,total_calls:0,likes_received:0,avg_rating:null,level:"",history:[]};
+  const hist=(p.history||[]).map(h=>`<div class="row" style="padding:11px 14px;border-bottom:1px solid var(--line);"><div style="flex:1;"><div style="font-size:14px;">${h.partner_name||"Partner"}</div><div style="font-size:11px;color:var(--mut);">${h.ended_at||""}</div></div><div style="font-size:13px;color:var(--mut);">${fmt(h.seconds||0)}</div></div>`).join("")||`<div class="sub" style="padding:16px;text-align:center;">No calls yet</div>`;
+  scr.innerHTML=`<div class="center" style="margin-bottom:18px;">
+      ${avatar(p.name||NAME,PHOTO,76)}
+      <h2 style="margin-top:10px;">${p.name||NAME}</h2>
+      <div style="font-size:13px;color:var(--gold);margin-top:2px;"><i class="ti ti-star"></i> ${p.avg_rating||"New"} ${p.level?"· "+lvlName(p.level):""}</div></div>
+    <div class="row" style="gap:10px;margin-bottom:16px;">
+      <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.minutes||0}</div><div style="font-size:11px;color:var(--mut);">minutes</div></div>
+      <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.total_calls||0}</div><div style="font-size:11px;color:var(--mut);">calls</div></div>
+      <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.likes_received||0}</div><div style="font-size:11px;color:var(--mut);">likes</div></div></div>
+    <div class="sub" style="margin-bottom:8px;">Call history</div>
+    <div class="card">${hist}</div>`;
+}
+
+go("speak");
 </script>
 </body>
 </html>

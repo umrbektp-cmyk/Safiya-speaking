@@ -1,4 +1,5 @@
 flask
 flask-cors
 gunicorn
-PyJWT
+livekit-api
+psycopg2-binary
