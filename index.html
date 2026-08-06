@@ -124,28 +124,26 @@ function callScreen(m){
   document.getElementById("nav").style.display="none";
   const label=lvlName(m.partner_level);
   let q=Math.floor(Math.random()*QS.length);
-  const render=()=>{
-    scr.innerHTML=`<div class="center">
+  scr.innerHTML=`<div class="center">
       <div style="position:relative;margin-bottom:10px;">${avatar(m.partner_name,m.partner_photo,84)}<span style="position:absolute;bottom:4px;right:4px;width:16px;height:16px;background:var(--green);border:3px solid var(--bg);border-radius:50%;"></span></div>
       <h2>${m.partner_name}</h2><div class="lvlbadge" style="margin-top:6px;">${label}</div>
       <div style="font-size:15px;color:var(--green);font-weight:600;margin-top:10px;" id="ct">00:00</div></div>
     <div class="card" style="padding:16px;margin-top:20px;">
       <div style="font-size:10px;letter-spacing:.08em;color:var(--mut2);margin-bottom:6px;">TALK ABOUT</div>
-      <div style="font-size:15px;line-height:1.5;">${QS[q]}</div>
+      <div style="font-size:15px;line-height:1.5;" id="qtext">${QS[q]}</div>
       <button class="btn" style="width:auto;padding:8px 14px;font-size:13px;margin-top:12px;" id="nextq"><i class="ti ti-refresh"></i> Next question</button></div>
     <div style="font-size:12px;color:var(--mut);text-align:center;margin:14px 0;" id="vstat">Connecting voice…</div>
     <div class="center" style="margin:6px 0 14px;"><button id="likebtn" style="background:none;border:none;cursor:pointer;color:var(--mut2);font-size:13px;"><i class="ti ti-heart" style="font-size:26px;display:block;margin-bottom:2px;"></i>Like partner</button></div>
     <div class="row" style="gap:10px;">
       <button class="btn" id="skip"><i class="ti ti-player-skip-forward"></i> Skip</button>
       <button class="btn btn-red" id="end"><i class="ti ti-phone-off"></i> End</button></div>`;
-    document.getElementById("nextq").onclick=()=>{q=(q+1)%QS.length;render();};
-    document.getElementById("likebtn").onclick=async(e)=>{if(!callLiked){callLiked=true;await api("/like",{uid:UID});const b=document.getElementById("likebtn");b.style.color="var(--gold)";b.innerHTML=`<i class="ti ti-heart-filled" style="font-size:26px;display:block;margin-bottom:2px;color:var(--gold);"></i>Liked`;}};
-    document.getElementById("skip").onclick=async()=>{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds,like:callLiked});startSearch(m.partner_level,label);};
-    document.getElementById("end").onclick=async()=>{disconnectVoice();clearTimers();await api("/end",{uid:UID,seconds:callSeconds,like:callLiked});ratingScreen(m);};
-    countTimer=setInterval(()=>{callSeconds++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
-    statusTimer=setInterval(async()=>{try{const st=await api("/status",{uid:UID});if(!st.active){disconnectVoice();clearTimers();ratingScreen(m,true);}}catch(e){}},2500);
-  };
-  render();
+  document.getElementById("nextq").onclick=()=>{q=(q+1)%QS.length;document.getElementById("qtext").textContent=QS[q];};
+  document.getElementById("likebtn").onclick=async()=>{if(!callLiked){callLiked=true;await api("/like",{uid:UID});const b=document.getElementById("likebtn");b.style.color="var(--gold)";b.innerHTML=`<i class="ti ti-heart-filled" style="font-size:26px;display:block;margin-bottom:2px;color:var(--gold);"></i>Liked`;}};
+  document.getElementById("skip").onclick=async()=>{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds,like:callLiked});startSearch(m.partner_level,label);};
+  document.getElementById("end").onclick=async()=>{disconnectVoice();clearTimers();await api("/end",{uid:UID,seconds:callSeconds,like:callLiked});ratingScreen(m);};
+  clearTimers();
+  countTimer=setInterval(()=>{callSeconds++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
+  statusTimer=setInterval(async()=>{try{const st=await api("/status",{uid:UID});if(!st.active){disconnectVoice();clearTimers();ratingScreen(m,true);}}catch(e){}},2500);
   connectVoice(m.room,()=>document.getElementById("vstat"));
 }
 
