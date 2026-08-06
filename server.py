@@ -8,7 +8,7 @@ import os, time, threading
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
-app = Flask(__name__, static_folder="public", static_url_path="")
+app = Flask(__name__, static_folder=".", static_url_path="")
 CORS(app)
 
 # ---- in-memory state ----
@@ -137,7 +137,7 @@ def _reaper():
 
 @app.route("/")
 def index():
-    return send_from_directory("public", "index.html")
+    return send_from_directory(".", "index.html")
 
 
 if __name__ == "__main__":
