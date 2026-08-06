@@ -116,10 +116,19 @@ function noPartner(label,levelId){
 
 let lkRoom=null;
 
-async function connectVoice(room, statusEl){
+async function connectVoice(room, statusEl, micBtn){
+  try{
+    // Ask for mic first — this is what triggers the browser prompt
+    await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    if(statusEl) statusEl.textContent="🔇 Microphone blocked. Tap the button to allow.";
+    if(micBtn){ micBtn.style.display="inline-block"; micBtn.onclick=()=>connectVoice(room,statusEl,micBtn); }
+    return;
+  }
   try{
     const r = await api("/token",{uid:UID,name:NAME,room:room});
     if(!r.token){ if(statusEl) statusEl.textContent="🔇 Voice unavailable"; return; }
+    if(micBtn) micBtn.style.display="none";
     lkRoom = new LivekitClient.Room({ adaptiveStream:true, dynacast:true });
     lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{
       if(track.kind==="audio"){ const a=track.attach(); a.autoplay=true; document.body.appendChild(a); }
@@ -128,7 +137,8 @@ async function connectVoice(room, statusEl){
     await lkRoom.localParticipant.setMicrophoneEnabled(true);
     if(statusEl) statusEl.textContent="🎙 Voice connected — speak!";
   }catch(e){
-    if(statusEl) statusEl.textContent="🔇 Mic blocked — allow microphone and retry";
+    if(statusEl) statusEl.textContent="🔇 Voice error. Tap to retry.";
+    if(micBtn){ micBtn.style.display="inline-block"; micBtn.onclick=()=>connectVoice(room,statusEl,micBtn); }
   }
 }
 
@@ -149,7 +159,10 @@ function callScreen(label,room,partnerName){
       <div class="qtext">${QS[q]}</div>
       <button class="qbtn" id="nextq">↻ Next question</button>
     </div>
-    <div style="font-size:12px;color:var(--mut);text-align:center;margin:14px 0;" id="vstat">Connecting voice…</div>
+    <div style="text-align:center;margin:14px 0;">
+      <button class="qbtn" id="micbtn" style="display:none;">🎙 Enable microphone</button>
+      <div style="font-size:12px;color:var(--mut);margin-top:6px;" id="vstat">Connecting voice…</div>
+    </div>
     <div class="actions">
       <button class="skip" id="skip">⏭ Skip</button>
       <button class="end" id="end">✕ End</button>
@@ -163,7 +176,7 @@ function callScreen(label,room,partnerName){
     },2000);
   };
   render();
-  connectVoice(room, document.getElementById("vstat"));
+  connectVoice(room, document.getElementById("vstat"), document.getElementById("micbtn"));
 }
 
 function levelIdFrom(label){ return label.toLowerCase().replace(/[- ]/g,"_"); }
