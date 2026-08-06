@@ -48,16 +48,18 @@ if (tg) { tg.ready(); tg.expand(); }
 
 // user id + name from Telegram (fallback to a random guest for browser testing)
 const U = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
-const UID = U ? String(U.id) : ("guest_" + Math.random().toString(36).slice(2,8));
+let _gid = null;
+try { _gid = localStorage.getItem("sp_guest"); if(!_gid){ _gid = "guest_"+Math.random().toString(36).slice(2,8); localStorage.setItem("sp_guest",_gid);} } catch(e){ _gid = "guest_"+Math.random().toString(36).slice(2,8); }
+const UID = U ? String(U.id) : _gid;
 const NAME = U ? (U.first_name || "Student") : "Guest";
 
 const LEVELS = [["beginner","Beginner"],["elementary","Elementary"],["pre_intermediate","Pre-Intermediate"],["intermediate","Intermediate"],["advanced","Advanced"]];
 const QS = ["What did you do last weekend?","Do you prefer the city or the countryside? Why?","What's a skill you'd like to learn, and why?","Describe your favourite meal in detail.","Is social media good or bad for society?","If you had a free day tomorrow, what would you do?","What kind of music do you enjoy?","Tell me about a place you'd love to visit."];
 
 const scr = document.getElementById("scr");
-let pollTimer=null, countTimer=null, searchTimer=null;
+let pollTimer=null, countTimer=null, searchTimer=null, statusTimer=null;
 
-function clearTimers(){ [pollTimer,countTimer,searchTimer].forEach(t=>t&&clearInterval(t)); pollTimer=countTimer=searchTimer=null; }
+function clearTimers(){ [pollTimer,countTimer,searchTimer,statusTimer].forEach(t=>t&&clearInterval(t)); pollTimer=countTimer=searchTimer=statusTimer=null; }
 
 async function api(path, body){
   const r = await fetch(API + path, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -99,7 +101,7 @@ async function startSearch(levelId, label){
   countTimer=setInterval(()=>{ t--; if(!document.getElementById("tmr")){clearInterval(countTimer);return;} tmr.textContent=`${Math.floor(t/60)}:${String(t%60).padStart(2,"0")}`; if(t<=0){ clearTimers(); api("/leave",{uid:UID}); noPartner(label,levelId);} },1000);
   pollTimer=setInterval(async()=>{
     try{ const p=await api("/poll",{uid:UID}); if(p.matched){ clearTimers(); callScreen(label,p.room,p.partner_name);} }catch(e){}
-  },2000);
+  },1500);
 }
 
 function noPartner(label,levelId){
@@ -135,8 +137,26 @@ function callScreen(label,room,partnerName){
     document.getElementById("skip").onclick=async()=>{ await api("/skip",{uid:UID}); startSearch(label.toLowerCase().replace(/[- ]/g,"_"),label); };
     document.getElementById("end").onclick=async()=>{ await api("/leave",{uid:UID}); levelScreen(); };
     let s=0; countTimer=setInterval(()=>{s++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;},1000);
+    statusTimer=setInterval(async()=>{
+      try{ const st=await api("/status",{uid:UID}); if(!st.active){ clearTimers(); partnerLeft(label,levelIdFrom(label)); } }catch(e){}
+    },2000);
   };
   render();
+}
+
+function levelIdFrom(label){ return label.toLowerCase().replace(/[- ]/g,"_"); }
+
+function partnerLeft(label,levelId){
+  clearTimers();
+  scr.innerHTML=`<div class="center">
+    <div class="circle"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
+    <div class="big">Partner left</div>
+    <div class="sub" style="max-width:240px;margin:6px 0 16px;">Your partner ended the call. Find a new one?</div>
+    <button class="btn" id="again" style="margin-bottom:10px;">Find new partner</button>
+    <button class="btn" id="home" style="background:transparent;border:none;color:var(--mut);">Back to levels</button>
+  </div>`;
+  document.getElementById("again").onclick=()=>startSearch(levelId,label);
+  document.getElementById("home").onclick=levelScreen;
 }
 
 levelScreen();

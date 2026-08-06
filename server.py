@@ -20,7 +20,7 @@ recent = {}   # uid -> set of recently-paired uids (avoid instant rematch)
 lock = threading.Lock()
 
 MATCH_TTL = 600   # forget a match after 10 min
-RECENT_TTL = 90   # don't rematch same pair within 90s
+RECENT_TTL = 8    # don't rematch same pair within 8s (just enough to avoid instant self-skip)
 
 
 def _clean(uid):
@@ -92,6 +92,17 @@ def poll():
             m = matches[uid]
             return jsonify(matched=True, partner_name=m["partner_name"], room=m["room"])
         return jsonify(matched=False)
+
+
+@app.route("/status", methods=["POST"])
+def status():
+    """User in a call checks whether they still have a match."""
+    d = request.get_json(force=True)
+    uid = str(d.get("uid", "")).strip()
+    with lock:
+        if uid in matches:
+            return jsonify(active=True)
+        return jsonify(active=False)
 
 
 @app.route("/skip", methods=["POST"])
