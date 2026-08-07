@@ -491,8 +491,11 @@ setInterval(refreshBell,45000);refreshBell();
 async function notifScreen(){
   document.getElementById("nav").style.display="none";
   scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('speak')">\u2039 Back</button><h2>Notifications</h2>
+    <div id="pendrev"></div>
     <div id="ntlist" style="margin-top:14px;"><div class="sub" style="text-align:center;padding:20px;">Loading\u2026</div></div>`;
   await api("/notif_seen",{uid:UID});refreshBell();
+  // admin: show pending reviews to approve
+  if(UID===ADMIN_UID){loadPendingReviews();}
   let res;try{res=await api("/notifs",{uid:UID});}catch(e){}
   const list=(res&&res.notifs)||[];
   const box=document.getElementById("ntlist");
@@ -511,6 +514,24 @@ async function notifScreen(){
       ${n.kind==="review_approved"?'<div class="cbtn" style="width:38px;height:38px;"><i class="ti '+icon+'" style="color:var(--gold);"></i></div>':avatar(n.from_name,n.from_photo,38)}
       <div style="flex:1;"><div style="font-size:13px;color:var(--navy);"><i class="ti ${icon}" style="color:var(--gold);margin-right:4px;"></i>${who}${txt}</div><div style="font-size:11px;color:var(--mut2);">${n.created||""}</div>${act}</div></div>`;
   }).join("");
+}
+async function loadPendingReviews(){
+  let res;try{res=await api("/reviews_pending",{uid:UID});}catch(e){}
+  const revs=(res&&res.reviews)||[];
+  const box=document.getElementById("pendrev");if(!box)return;
+  if(!revs.length){box.innerHTML="";return;}
+  box.innerHTML=`<div style="background:var(--goldbg);border-radius:12px;padding:12px;margin-bottom:8px;">
+    <div style="font-size:12px;font-weight:600;color:var(--golddk);margin-bottom:8px;">\uD83D\uDCDD ${revs.length} review${revs.length>1?'s':''} awaiting your approval</div>
+    ${revs.map(r=>`<div class="card" style="padding:11px;margin-bottom:8px;" id="prev${r.id}">
+      <div class="row" style="gap:8px;margin-bottom:5px;">${avatar(r.name,r.photo_url,30)}<div style="flex:1;"><div style="font-size:13px;font-weight:600;">${escapeHtml(r.name)}</div><div style="font-size:11px;">${"\u2B50".repeat(Math.max(1,Math.min(5,r.stars||5)))}</div></div></div>
+      <div style="font-size:13px;color:var(--navy);margin-bottom:8px;">${escapeHtml(r.text)}</div>
+      <div class="row" style="gap:8px;"><button class="btn btn-green" style="padding:7px;font-size:12px;" onclick="moderateReview(${r.id},'approve')">\u2705 Approve</button><button class="btn btn-red" style="padding:7px;font-size:12px;" onclick="moderateReview(${r.id},'reject')">\u274C Reject</button></div>
+    </div>`).join("")}</div>`;
+}
+async function moderateReview(id,action){
+  await api("/review_moderate",{uid:UID,id:id,action:action});
+  const el=document.getElementById("prev"+id);
+  if(el)el.innerHTML=`<div style="text-align:center;padding:10px;font-size:12px;color:${action==='approve'?'var(--green)':'var(--mut)'};">${action==='approve'?'\u2705 Approved — now public':'\u274C Rejected'}</div>`;
 }
 async function acceptFollow(follower,btn){await api("/follow_accept",{uid:UID,name:NAME,photo:PHOTO,follower_uid:follower});btn.parentElement.innerHTML='<span class="sub" style="color:var(--green);">Accepted \u2713</span>';}
 async function rejectFollow(follower,btn){await api("/follow_reject",{uid:UID,follower_uid:follower});btn.parentElement.innerHTML='<span class="sub">Rejected</span>';}

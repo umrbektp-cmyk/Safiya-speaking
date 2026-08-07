@@ -16,7 +16,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
-APP_VERSION    = "15"  # bump on each deploy so clients auto-update
+APP_VERSION    = "16"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -103,12 +103,19 @@ INVITE_LINES = [
     "Your English won't practice itself 😄 Jump into a quick call!",
     "{count} learners are online now — come say hello 👋",
     "Quick speaking session? Someone's online and ready 💬",
+    "{name} wants to practice with you — up for a chat? 😊",
+    "{name} is waiting in the lobby. Join her? 🎙️",
 ]
+
+# Friendly girls' names used in invite messages (engages better)
+INVITE_NAMES = ["Malika","Sevara","Nilufar","Dilnoza","Gulnora","Madina","Shahzoda","Zilola",
+                "Feruza","Nozima","Kamila","Sabina","Munisa","Dildora","Charos","Rayhona",
+                "Oisha","Zarina","Laylo","Nafisa"]
 
 def _reminder_loop():
     import random as _r
     while True:
-        time.sleep(900)  # 15 minutes
+        time.sleep(7200)  # 2 hours
         if not (TELEGRAM_TOKEN and BTN_URL and DATABASE_URL):
             continue
         try:
@@ -120,10 +127,9 @@ def _reminder_loop():
                             (time.time()-3*86400,))
                 targets = cur.fetchall()
             conn.close()
-            names = [t[1] for t in targets if t[1]]
             for uid, name in targets:
                 line = _r.choice(INVITE_LINES)
-                other = _r.choice(names) if names else "Someone"
+                other = _r.choice(INVITE_NAMES)
                 msg = line.format(name=other, count=max(online,2))
                 tg_send(uid, msg, "🎤 Start practicing", BTN_URL)
                 time.sleep(0.05)
@@ -803,17 +809,45 @@ def ep_review_submit():
     photo=d.get("photo") or ""; stars=int(d.get("stars") or 5); text=(d.get("text") or "").strip()
     if not uid or not text: return jsonify(ok=False)
     rid=add_review(uid,name,photo,stars,text)
-    # ping admin with approve/reject buttons
+    # ping admin (approval happens inside the app, no webhook needed)
     ADMIN="960055324"
     if TELEGRAM_TOKEN and rid:
         stars_s="⭐"*max(1,min(5,stars))
-        tg_send_buttons(ADMIN, f"📝 New review from {name} {stars_s}\\n\\n\"{text}\"\\n\\nApprove to show it publicly?",
-            [[{"text":"✅ Approve","callback_data":f"rev_ok_{rid}"},{"text":"❌ Reject","callback_data":f"rev_no_{rid}"}]])
+        tg_send(ADMIN, f"📝 New review from {name} {stars_s}\n\n\"{text}\"\n\nOpen the app → tap the bell 🔔 to approve or reject it.", "Open app", BTN_URL)
     return jsonify(ok=True)
 
 @app.route("/reviews", methods=["POST"])
 def ep_reviews():
     return jsonify(reviews=get_approved_reviews())
+
+@app.route("/reviews_pending", methods=["POST"])
+def ep_reviews_pending():
+    """Admin-only: list reviews awaiting approval."""
+    d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    if uid!="960055324": return jsonify(reviews=[])
+    if not DATABASE_URL: return jsonify(reviews=[])
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id,name,photo_url,stars,text,created FROM sp_reviews WHERE status='pending' ORDER BY id DESC LIMIT 50")
+            return jsonify(reviews=[dict(r) for r in cur.fetchall()])
+    except: return jsonify(reviews=[])
+    finally: conn.close()
+
+@app.route("/review_moderate", methods=["POST"])
+def ep_review_moderate():
+    """Admin-only: approve or reject a pending review."""
+    d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    if uid!="960055324": return jsonify(ok=False)
+    rid=d.get("id"); action=(d.get("action") or "").strip()
+    if not rid: return jsonify(ok=False)
+    rev=get_review(rid)
+    if action=="approve":
+        set_review_status(rid,"approved")
+        if rev: add_notif(rev.get("uid",""),"review_approved","","Safiya","")
+    elif action=="reject":
+        set_review_status(rid,"rejected")
+    return jsonify(ok=True)
 
 # ─── Version (auto-update) ───────────────────────────────────────────────────
 @app.route("/version", methods=["GET","POST"])
