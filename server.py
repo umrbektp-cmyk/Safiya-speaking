@@ -16,6 +16,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
+APP_VERSION    = "15"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -32,6 +33,37 @@ def tg_send(chat_id, text, button_text=None, button_url=None):
         urllib.request.urlopen(req, timeout=5).read()
     except Exception as e:
         print("tg_send error:", str(e)[:150])
+
+def tg_send_buttons(chat_id, text, inline_keyboard):
+    """Send a message with callback buttons (for admin approve/reject)."""
+    if not TELEGRAM_TOKEN or not chat_id: return
+    try:
+        payload={"chat_id":str(chat_id),"text":text,"reply_markup":_json.dumps({"inline_keyboard":inline_keyboard})}
+        data=urllib.parse.urlencode(payload).encode()
+        req=urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data=data)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print("tg_send_buttons error:", str(e)[:150])
+
+def tg_answer_callback(callback_id, text=""):
+    if not TELEGRAM_TOKEN: return
+    try:
+        payload={"callback_query_id":callback_id,"text":text}
+        data=urllib.parse.urlencode(payload).encode()
+        req=urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", data=data)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print("answer_callback error:", str(e)[:120])
+
+def tg_edit_text(chat_id, message_id, text):
+    if not TELEGRAM_TOKEN: return
+    try:
+        payload={"chat_id":str(chat_id),"message_id":message_id,"text":text}
+        data=urllib.parse.urlencode(payload).encode()
+        req=urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText", data=data)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print("edit_text error:", str(e)[:120])
 
 
 def make_token(identity, name, room):
@@ -115,6 +147,14 @@ def init_db():
         follower TEXT, following TEXT, created TEXT, PRIMARY KEY (follower, following))""")
     _run("""CREATE TABLE IF NOT EXISTS sp_messages (
         id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, text TEXT, created TEXT, ts DOUBLE PRECISION)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_follow_reqs (
+        follower TEXT, following TEXT, created TEXT, PRIMARY KEY (follower, following))""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_notifs (
+        id SERIAL PRIMARY KEY, uid TEXT, kind TEXT, from_uid TEXT, from_name TEXT, from_photo TEXT,
+        extra TEXT, seen INTEGER DEFAULT 0, ts DOUBLE PRECISION, created TEXT)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_reviews (
+        id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, stars INTEGER, text TEXT,
+        status TEXT DEFAULT 'pending', ts DOUBLE PRECISION, created TEXT)""")
     print("init_db complete")
 
 def upsert_user(uid, name, photo_url, level=None):
@@ -229,6 +269,131 @@ def count_online(within=70):
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM sp_users WHERE last_seen > %s",(time.time()-within,))
             return cur.fetchone()[0]
+
+
+# ─── Notifications ───────────────────────────────────────────────────────────
+def add_notif(uid, kind, from_uid="", from_name="", from_photo="", extra=""):
+    if not DATABASE_URL or str(uid)==str(from_uid): return
+    _run("""INSERT INTO sp_notifs (uid,kind,from_uid,from_name,from_photo,extra,seen,ts,created)
+            VALUES (%s,%s,%s,%s,%s,%s,0,%s,%s)""",
+         (str(uid),kind,str(from_uid),from_name,from_photo,extra,time.time(),time.strftime("%m/%d %H:%M")))
+
+def get_notifs(uid, limit=40):
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sp_notifs WHERE uid=%s ORDER BY id DESC LIMIT %s",(str(uid),limit))
+            return [dict(r) for r in cur.fetchall()]
+    except: return []
+    finally: conn.close()
+
+def unseen_notif_count(uid):
+    if not DATABASE_URL: return 0
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM sp_notifs WHERE uid=%s AND seen=0",(str(uid),))
+            return cur.fetchone()[0]
+    except: return 0
+    finally: conn.close()
+
+def mark_notifs_seen(uid):
+    _run("UPDATE sp_notifs SET seen=1 WHERE uid=%s",(str(uid),))
+
+# ─── Follow requests (Instagram-private style) ───────────────────────────────
+def add_follow_request(follower, following):
+    if not DATABASE_URL or str(follower)==str(following): return
+    _run("INSERT INTO sp_follow_reqs (follower,following,created) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+         (str(follower),str(following),time.strftime("%Y-%m-%d")))
+
+def follow_request_pending(follower, following):
+    if not DATABASE_URL: return False
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM sp_follow_reqs WHERE follower=%s AND following=%s",(str(follower),str(following)))
+            return cur.fetchone() is not None
+    except: return False
+    finally: conn.close()
+
+def accept_follow_request(follower, following):
+    """following accepts follower -> becomes a real follow."""
+    _run("DELETE FROM sp_follow_reqs WHERE follower=%s AND following=%s",(str(follower),str(following)))
+    _run("INSERT INTO sp_follows (follower,following,created) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+         (str(follower),str(following),time.strftime("%Y-%m-%d")))
+
+def reject_follow_request(follower, following):
+    _run("DELETE FROM sp_follow_reqs WHERE follower=%s AND following=%s",(str(follower),str(following)))
+
+def following_count(uid):
+    if not DATABASE_URL: return 0
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM sp_follows WHERE follower=%s",(str(uid),))
+            return cur.fetchone()[0]
+    except: return 0
+    finally: conn.close()
+
+def get_followers(uid):
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""SELECT u.uid,u.name,u.photo_url,u.level FROM sp_follows f
+                JOIN sp_users u ON u.uid=f.follower WHERE f.following=%s ORDER BY u.name""",(str(uid),))
+            return [dict(r) for r in cur.fetchall()]
+    except: return []
+    finally: conn.close()
+
+# ─── Reviews / testimonials ──────────────────────────────────────────────────
+def add_review(uid, name, photo, stars, text):
+    if not DATABASE_URL or not text.strip(): return None
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO sp_reviews (uid,name,photo_url,stars,text,status,ts,created)
+                VALUES (%s,%s,%s,%s,%s,'pending',%s,%s) RETURNING id""",
+                (str(uid),name,photo,int(stars or 5),text[:400],time.time(),time.strftime("%Y-%m-%d")))
+            rid=cur.fetchone()[0]
+        conn.commit(); return rid
+    except Exception as e:
+        conn.rollback(); print("add_review error:",str(e)[:120]); return None
+    finally: conn.close()
+
+def set_review_status(rid, status):
+    _run("UPDATE sp_reviews SET status=%s WHERE id=%s",(status,int(rid)))
+
+def get_review(rid):
+    if not DATABASE_URL: return None
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sp_reviews WHERE id=%s",(int(rid),))
+            r=cur.fetchone(); return dict(r) if r else None
+    except: return None
+    finally: conn.close()
+
+def get_approved_reviews(limit=30):
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT name,photo_url,stars,text,created FROM sp_reviews WHERE status='approved' ORDER BY random() LIMIT %s",(limit,))
+            return [dict(r) for r in cur.fetchall()]
+    except: return []
+    finally: conn.close()
+
+# ─── Last seen formatting (Telegram-style) ───────────────────────────────────
+def last_seen_text(ts):
+    if not ts: return "recently"
+    diff=time.time()-ts
+    if diff<70: return "online now"
+    if diff<3600: return f"{int(diff//60)} min ago"
+    if diff<86400: return f"{int(diff//3600)} hours ago"
+    if diff<172800: return "yesterday"
+    return time.strftime("%b %d", time.localtime(ts))
 
 
 # ─── Follows + Community messages ────────────────────────────────────────────
@@ -435,16 +600,24 @@ def leave():
 def rate():
     d=request.get_json(force=True)
     target=str(d.get("partner_uid","")).strip(); stars=int(d.get("stars") or 0); like=bool(d.get("like"))
+    frm=str(d.get("uid","")).strip(); frm_name=(d.get("name") or "Someone").strip(); frm_photo=d.get("photo") or ""
     if target:
-        if stars: add_rating(target, stars)
-        if like: add_like(target)
+        if stars:
+            add_rating(target, stars)
+            add_notif(target,"rating",frm,frm_name,frm_photo,str(stars))
+        if like:
+            add_like(target)
+            add_notif(target,"like",frm,frm_name,frm_photo)
     return jsonify(ok=True)
 
 
 @app.route("/like", methods=["POST"])
 def like():
     d=request.get_json(force=True); target=str(d.get("partner_uid","")).strip()
-    if target: add_like(target)
+    frm=str(d.get("uid","")).strip(); frm_name=(d.get("name") or "Someone").strip(); frm_photo=d.get("photo") or ""
+    if target:
+        add_like(target)
+        add_notif(target,"like",frm,frm_name,frm_photo)
     return jsonify(ok=True)
 
 
@@ -454,21 +627,31 @@ def profile():
     p=get_profile(uid)
     if not p: return jsonify(profile=None)
     p["history"]=get_call_history(uid)
+    p["followers"]=follower_count(uid)
+    p["following"]=following_count(uid)
     return jsonify(profile=p)
 
 
 @app.route("/pubprofile", methods=["POST"])
 def pubprofile():
     d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    viewer=str(d.get("viewer","")).strip()
     p=get_profile(uid)
     if not p: return jsonify(profile=None)
     with lock:
         online = p.get("last_seen",0) > time.time()-70
         busy = uid in matches
+    # follow relationship from viewer's perspective
+    fstate="none"
+    if viewer and viewer!=uid:
+        if is_following(viewer,uid): fstate="following"
+        elif follow_request_pending(viewer,uid): fstate="requested"
     return jsonify(profile={"uid":p["uid"],"name":p["name"],"photo_url":p.get("photo_url",""),"level":p.get("level",""),
                             "bio":p.get("bio",""),"minutes":p["minutes"],"total_calls":p.get("total_calls",0),
                             "likes_received":p.get("likes_received",0),"avg_rating":p.get("avg_rating"),
-                            "online":online,"busy":busy})
+                            "followers":follower_count(uid),"following":following_count(uid),
+                            "last_seen":last_seen_text(p.get("last_seen",0)),
+                            "online":online,"busy":busy,"follow_state":fstate})
 
 
 @app.route("/setlevel", methods=["POST"])
@@ -544,8 +727,34 @@ def request_respond():
 # ─── Follow / Friends endpoints ──────────────────────────────────────────────
 @app.route("/follow", methods=["POST"])
 def ep_follow():
+    """Now sends a follow REQUEST (Instagram-private style)."""
     d=request.get_json(force=True)
-    follow_user(str(d.get("uid","")).strip(), str(d.get("target_uid","")).strip())
+    frm=str(d.get("uid","")).strip(); frm_name=(d.get("name") or "Someone").strip(); frm_photo=d.get("photo") or ""
+    target=str(d.get("target_uid","")).strip()
+    if not frm or not target or frm==target: return jsonify(ok=False)
+    # if already following, no-op
+    if is_following(frm,target): return jsonify(ok=True, state="following")
+    add_follow_request(frm,target)
+    add_notif(target,"follow_request",frm,frm_name,frm_photo)
+    if BTN_URL:
+        tg_send(target, f"👤 {frm_name} wants to follow you on Safiya Speaking. Open the app to accept.", "Open app", BTN_URL)
+    return jsonify(ok=True, state="requested")
+
+@app.route("/follow_accept", methods=["POST"])
+def ep_follow_accept():
+    d=request.get_json(force=True)
+    me=str(d.get("uid","")).strip(); me_name=(d.get("name") or "Someone").strip(); me_photo=d.get("photo") or ""
+    follower=str(d.get("follower_uid","")).strip()
+    if me and follower:
+        accept_follow_request(follower, me)
+        add_notif(follower,"follow_accepted",me,me_name,me_photo)
+    return jsonify(ok=True)
+
+@app.route("/follow_reject", methods=["POST"])
+def ep_follow_reject():
+    d=request.get_json(force=True)
+    me=str(d.get("uid","")).strip(); follower=str(d.get("follower_uid","")).strip()
+    if me and follower: reject_follow_request(follower, me)
     return jsonify(ok=True)
 
 @app.route("/unfollow", methods=["POST"])
@@ -558,6 +767,88 @@ def ep_unfollow():
 def ep_friends():
     d=request.get_json(force=True)
     return jsonify(friends=get_following(str(d.get("uid","")).strip()))
+
+@app.route("/followers", methods=["POST"])
+def ep_followers():
+    d=request.get_json(force=True)
+    return jsonify(followers=get_followers(str(d.get("uid","")).strip()))
+
+# ─── Notifications endpoints ─────────────────────────────────────────────────
+@app.route("/notifs", methods=["POST"])
+def ep_notifs():
+    d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    notifs=get_notifs(uid)
+    # annotate follow_request notifs with whether still pending
+    for n in notifs:
+        if n.get("kind")=="follow_request":
+            n["pending"]=follow_request_pending(n.get("from_uid",""), uid)
+    return jsonify(notifs=notifs)
+
+@app.route("/notif_count", methods=["POST"])
+def ep_notif_count():
+    d=request.get_json(force=True)
+    return jsonify(count=unseen_notif_count(str(d.get("uid","")).strip()))
+
+@app.route("/notif_seen", methods=["POST"])
+def ep_notif_seen():
+    d=request.get_json(force=True)
+    mark_notifs_seen(str(d.get("uid","")).strip())
+    return jsonify(ok=True)
+
+# ─── Reviews / testimonials ──────────────────────────────────────────────────
+@app.route("/review_submit", methods=["POST"])
+def ep_review_submit():
+    d=request.get_json(force=True)
+    uid=str(d.get("uid","")).strip(); name=(d.get("name") or "Learner").strip()
+    photo=d.get("photo") or ""; stars=int(d.get("stars") or 5); text=(d.get("text") or "").strip()
+    if not uid or not text: return jsonify(ok=False)
+    rid=add_review(uid,name,photo,stars,text)
+    # ping admin with approve/reject buttons
+    ADMIN="960055324"
+    if TELEGRAM_TOKEN and rid:
+        stars_s="⭐"*max(1,min(5,stars))
+        tg_send_buttons(ADMIN, f"📝 New review from {name} {stars_s}\\n\\n\"{text}\"\\n\\nApprove to show it publicly?",
+            [[{"text":"✅ Approve","callback_data":f"rev_ok_{rid}"},{"text":"❌ Reject","callback_data":f"rev_no_{rid}"}]])
+    return jsonify(ok=True)
+
+@app.route("/reviews", methods=["POST"])
+def ep_reviews():
+    return jsonify(reviews=get_approved_reviews())
+
+# ─── Version (auto-update) ───────────────────────────────────────────────────
+@app.route("/version", methods=["GET","POST"])
+def ep_version():
+    return jsonify(version=APP_VERSION)
+
+# ─── Telegram webhook (handles admin Approve/Reject taps on reviews) ──────────
+@app.route("/tg_webhook", methods=["POST"])
+def ep_tg_webhook():
+    try:
+        upd=request.get_json(force=True)
+    except:
+        return jsonify(ok=True)
+    cq=upd.get("callback_query")
+    if cq:
+        data=cq.get("data","")
+        cid=cq.get("id")
+        msg=cq.get("message",{})
+        chat_id=msg.get("chat",{}).get("id")
+        mid=msg.get("message_id")
+        if data.startswith("rev_ok_") or data.startswith("rev_no_"):
+            rid=data.split("_")[-1]
+            rev=get_review(rid)
+            if not rev:
+                tg_answer_callback(cid,"Review not found"); return jsonify(ok=True)
+            if data.startswith("rev_ok_"):
+                set_review_status(rid,"approved")
+                tg_answer_callback(cid,"Approved ✅")
+                if chat_id and mid: tg_edit_text(chat_id,mid,f"✅ APPROVED — now shown publicly:\\n\\n\"{rev.get('text','')}\" — {rev.get('name','')}")
+                add_notif(rev.get("uid",""),"review_approved","","Safiya","")
+            else:
+                set_review_status(rid,"rejected")
+                tg_answer_callback(cid,"Rejected ❌")
+                if chat_id and mid: tg_edit_text(chat_id,mid,f"❌ REJECTED (hidden):\\n\\n\"{rev.get('text','')}\" — {rev.get('name','')}")
+    return jsonify(ok=True)
 
 # ─── Community chat endpoints ────────────────────────────────────────────────
 @app.route("/messages", methods=["POST"])

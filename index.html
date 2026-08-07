@@ -36,7 +36,9 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><div class="t">Safiya Speaking</div><div class="s">by Umrbek TP</div></div>
+  <div class="top" style="position:relative;"><div class="t">Safiya Speaking</div><div class="s">by Umrbek TP</div>
+    <div id="bell" onclick="notifScreen()" style="position:absolute;right:14px;top:12px;cursor:pointer;"><i class="ti ti-bell" style="font-size:22px;color:var(--navy);"></i><span id="belldot" style="display:none;position:absolute;top:-2px;right:-2px;width:9px;height:9px;background:var(--red);border-radius:50%;"></span></div>
+  </div>
   <div class="scr" id="scr"></div>
 </div>
 <div class="nav" id="nav">
@@ -76,7 +78,7 @@ function watchIncoming(){
 }
 
 function go(tab){
-  clearTimers();
+  clearTimers();currentTab=tab;inCall=false;
   document.querySelectorAll(".nav div").forEach(d=>d.classList.toggle("on",d.dataset.tab===tab));
   document.getElementById("nav").style.display="flex";
   if(tab==="speak")speakHome();else if(tab==="chat")chatScreen();else if(tab==="ranks")ranksScreen();else if(tab==="profile")profileScreen();
@@ -97,11 +99,55 @@ async function speakHome(){
     <div class="card" style="width:100%;margin-top:14px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;">
       <div style="text-align:left;"><div style="font-size:13px;font-weight:600;">My level only</div><div style="font-size:11px;color:var(--mut);">${onlyLevel?"On \u00B7 "+lvlName(myLevel):"Off \u00B7 match all levels"}</div></div>
       <div class="toggle" id="oltog" style="background:${onlyLevel?'var(--gold)':'#e0d6b8'};"><div class="knob" style="${onlyLevel?'right:3px;':'left:3px;'}"></div></div>
+    </div>
+    <div style="width:100%;margin-top:22px;">
+      <div style="font-size:13px;font-weight:600;color:var(--navy);text-align:center;margin-bottom:10px;">What do learners say about Safiya AI?</div>
+      <div id="revcard" style="min-height:96px;"></div>
+      <div style="text-align:center;margin-top:10px;"><span id="sharexp" style="color:var(--gold);font-weight:600;font-size:13px;cursor:pointer;">\u270D\uFE0F Share your experience</span></div>
     </div></div>`;
   document.getElementById("freebtn").onclick=()=>startSearch("free");
   document.getElementById("rpbtn").onclick=()=>startSearch("roleplay");
   document.getElementById("oltog").onclick=()=>{onlyLevel=!onlyLevel;localStorage.setItem("sp_only",onlyLevel?"1":"0");speakHome();};
+  document.getElementById("sharexp").onclick=shareExperienceScreen;
+  loadTestimonials();
   watchIncoming();
+}
+
+let _revList=[],_revIdx=0,_revTimer=null;
+async function loadTestimonials(){
+  let res;try{res=await api("/reviews",{});}catch(e){}
+  _revList=(res&&res.reviews)||[];
+  const card=document.getElementById("revcard");if(!card)return;
+  if(!_revList.length){card.innerHTML=`<div class="card" style="padding:14px;text-align:center;color:var(--mut);font-size:12px;">Be the first to share your experience \uD83D\uDC9B</div>`;return;}
+  _revIdx=0;renderTestimonial();
+  if(_revTimer)clearInterval(_revTimer);
+  if(_revList.length>1)_revTimer=setInterval(()=>{_revIdx=(_revIdx+1)%_revList.length;renderTestimonial();},4000);
+}
+function renderTestimonial(){
+  const card=document.getElementById("revcard");if(!card)return;
+  const r=_revList[_revIdx];const stars="\u2B50".repeat(Math.max(1,Math.min(5,r.stars||5)));
+  card.innerHTML=`<div class="card" style="padding:13px;transition:opacity .3s;">
+    <div class="row" style="gap:8px;margin-bottom:6px;">${avatar(r.name,r.photo_url,32)}<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:var(--navy);">${escapeHtml(r.name)}</div><div style="font-size:11px;">${stars}</div></div><div style="font-size:10px;color:var(--mut2);">${r.created||""}</div></div>
+    <div style="font-size:13px;color:var(--navy);line-height:1.4;">${escapeHtml(r.text)}</div></div>`;
+}
+function shareExperienceScreen(){
+  if(_revTimer)clearInterval(_revTimer);
+  document.getElementById("nav").style.display="none";
+  let stars=5;
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('speak')">\u2039 Back</button>
+    <h2>Share your experience</h2><div class="sub">Tell others how Safiya helped you. Your review is checked before it's shown.</div>
+    <div style="margin:18px 0 8px;font-size:13px;color:var(--navy);">Your rating</div>
+    <div id="rvstars" style="display:flex;gap:8px;margin-bottom:16px;"></div>
+    <textarea id="rvtext" rows="4" maxlength="400" placeholder="e.g. My confidence has grown so much, I can speak English much better now!"></textarea>
+    <button class="btn btn-gold" id="rvsubmit" style="margin-top:12px;">Submit review</button>
+    <div class="sub" id="rvmsg" style="text-align:center;margin-top:10px;"></div>`;
+  const sb=document.getElementById("rvstars");
+  for(let i=1;i<=5;i++){const s=document.createElement("i");s.className="ti ti-star star on";s.onclick=()=>{stars=i;[...sb.children].forEach((c,idx)=>c.classList.toggle("on",idx<i));};sb.appendChild(s);}
+  document.getElementById("rvsubmit").onclick=async()=>{
+    const t=document.getElementById("rvtext").value.trim();if(!t){document.getElementById("rvmsg").textContent="Please write something first.";return;}
+    await api("/review_submit",{uid:UID,name:NAME,photo:PHOTO,stars:stars,text:t});
+    scr.innerHTML=`<div class="center" style="padding-top:80px;"><div style="width:70px;height:70px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i class="ti ti-check" style="font-size:32px;color:var(--gold);"></i></div><h2>Thank you!</h2><div class="sub" style="max-width:240px;margin-top:8px;">Your review was sent for approval. It'll appear once confirmed.</div><button class="btn" style="width:auto;margin-top:20px;padding:11px 26px;" onclick="go('speak')">Back to home</button></div>`;
+  };
 }
 
 let searchMode="free";
@@ -126,16 +172,53 @@ async function startSearch(mode){
 
 function noPartner(){
   const rp=searchMode==="roleplay";
-  scr.innerHTML=`<div class="center" style="padding-top:70px;">
+  scr.innerHTML=`<div class="center" style="padding-top:60px;">
     <div style="width:96px;height:96px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:16px;"><i class="ti ti-clock" style="font-size:34px;color:var(--gold);"></i></div>
-    <h2>No one's here yet</h2><div class="sub" style="max-width:250px;margin:6px 0 16px;">${rp?'No roleplay partner now. Invite a friend from their profile, or try again.':'Nobody free right now. Try again in a bit.'}</div>
+    <h2>No one's here yet</h2><div class="sub" style="max-width:250px;margin:6px 0 16px;">${rp?'No roleplay partner right now. Invite someone to challenge them!':'Nobody free right now. Try again in a bit.'}</div>
+    ${rp?'<button class="btn btn-gold" style="width:auto;padding:12px 28px;margin-bottom:8px;" onclick="invitePickerScreen()"><i class=\"ti ti-user-plus\"></i> Invite someone</button>':''}
     <button class="btn" style="width:auto;padding:11px 26px;margin-bottom:8px;" onclick="startSearch()">Try again</button>
     <button class="btn" style="width:auto;padding:11px 26px;border:none;color:var(--mut);" onclick="go('speak')">Back</button></div>`;
 }
 
+// Roleplay: pick who to invite — online users or your friends
+async function invitePickerScreen(){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="startSearch('roleplay')">\u2039 Back</button>
+    <h2>Invite to Roleplay</h2><div class="sub">Challenge someone to a roleplay \uD83C\uDFAD</div>
+    <div style="font-size:12px;color:var(--mut2);margin:16px 0 8px;">PEOPLE YOU FOLLOW</div>
+    <div id="invfr"><div class="sub" style="text-align:center;padding:14px;">Loading\u2026</div></div>
+    <div style="font-size:12px;color:var(--mut2);margin:18px 0 8px;">TOP LEARNERS</div>
+    <div id="invtop"><div class="sub" style="text-align:center;padding:14px;">Loading\u2026</div></div>`;
+  // friends
+  let fr;try{fr=await api("/friends",{uid:UID});}catch(e){}
+  const friends=(fr&&fr.friends)||[];
+  const fbox=document.getElementById("invfr");
+  fbox.innerHTML=friends.length?friends.map(f=>inviteRow(f)).join(""):`<div class="sub" style="padding:6px 0;">You're not following anyone yet.</div>`;
+  // leaderboard as "anybody"
+  let lb;try{lb=await api("/leaderboard",{kind:"minutes"});}catch(e){}
+  const top=((lb&&lb.board)||[]).filter(x=>x.uid!==UID).slice(0,15);
+  const tbox=document.getElementById("invtop");
+  tbox.innerHTML=top.length?top.map(f=>inviteRow(f)).join(""):`<div class="sub" style="padding:6px 0;">No one yet.</div>`;
+}
+function inviteRow(f){
+  const on=f.online?'<span style="color:var(--green);font-size:11px;">\u25CF online</span>':'';
+  return `<div class="row" style="padding:9px 6px;border-bottom:1px solid var(--line);">${avatar(f.name,f.photo_url,36)}<div style="flex:1;"><div style="font-size:14px;font-weight:600;">${escapeHtml(f.name||"Learner")}</div><div>${on} ${lvlName(f.level)}</div></div><button class="btn btn-gold" style="width:auto;padding:7px 14px;font-size:12px;" onclick="sendRoleplayInvite('${f.uid}','${escapeHtml(f.name||"")}')">Invite</button></div>`;
+}
+async function sendRoleplayInvite(uid,name){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<div class="center" style="padding-top:70px;">
+    <div style="width:70px;height:70px;border-radius:50%;background:var(--goldbg);display:flex;align-items:center;justify-content:center;margin-bottom:14px;"><i class="ti ti-masks-theater" style="font-size:28px;color:var(--gold);"></i></div>
+    <h2>Invite sent</h2><div class="sub" style="max-width:220px;margin-top:6px;">Waiting for ${name||"them"} to accept the roleplay\u2026</div>
+    <div class="err" id="err"></div>
+    <button class="btn" style="width:auto;padding:10px 26px;margin-top:20px;border:none;color:var(--mut);" onclick="api('/leave',{uid:UID});go('speak')">Cancel</button></div>`;
+  let res;try{res=await api("/roleplay_invite",{uid:UID,name:NAME,photo:PHOTO,target_uid:uid});}catch(e){document.getElementById("err").textContent="Failed to send.";return;}
+  if(!res.ok){document.getElementById("err").textContent=res.reason==="busy"?"They're in a call now.":"Couldn't send.";return;}
+  reqTimer=setInterval(async()=>{try{const c=await api("/request_check",{uid:UID});if(c.accepted){clearInterval(reqTimer);callScreen(c);}}catch(e){}},2000);
+}
+
 const STICKERS=["👏","🔥","😂","❤️","👍","🎉","😮","🙌"];
 function callScreen(m){
-  clearTimers();callSeconds=0;muted=false;
+  clearTimers();callSeconds=0;muted=false;inCall=true;_curMatch=m;
   const liked={v:false};
   document.getElementById("nav").style.display="none";
   const label=lvlName(m.partner_level);let q=Math.floor(Math.random()*QS.length);
@@ -149,7 +232,7 @@ function callScreen(m){
     const myRole=meSideA?sc.a:sc.b;
     const mySecret=meSideA?sc.sa:sc.sb;
     const theirRole=meSideA?sc.b:sc.a;
-    topicCard=`<div class="card" style="padding:16px;margin-top:16px;">
+    topicCard=`<div class="card" id="rpcard" style="padding:16px;margin-top:16px;">
       <div style="font-size:10px;letter-spacing:.08em;color:var(--mut2);margin-bottom:6px;">🎭 ROLEPLAY · ${sc.t}</div>
       <div style="font-size:14px;line-height:1.5;color:var(--navy);margin-bottom:10px;">${sc.s}</div>
       <div style="background:var(--goldbg);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
@@ -173,7 +256,7 @@ function callScreen(m){
     <div class="row" style="justify-content:center;gap:22px;margin-bottom:14px;">
       <div class="center"><div class="cbtn" id="mutebtn"><i class="ti ti-microphone" style="font-size:22px;color:var(--navy);"></i></div><div style="font-size:10px;color:var(--mut);margin-top:4px;" id="mutelbl">Mute</div></div>
       <div class="center"><div class="cbtn" id="likebtn"><i class="ti ti-heart" style="font-size:22px;color:var(--gold);"></i></div><div style="font-size:10px;color:var(--mut);margin-top:4px;" id="likelbl">Like</div></div></div>
-    <div class="row" style="gap:10px;"><button class="btn" id="skip"><i class="ti ti-player-skip-forward"></i> ${isRP?'New':'Skip'}</button><button class="btn btn-red" id="end"><i class="ti ti-phone-off"></i> End</button></div>`;
+    <div class="row" style="gap:10px;"><button class="btn" id="skip"><i class="ti ${isRP?'ti-refresh':'ti-player-skip-forward'}"></i> ${isRP?'New topic':'Skip'}</button><button class="btn btn-red" id="end"><i class="ti ti-phone-off"></i> End</button></div>`;
   if(!isRP)document.getElementById("nextq").onclick=()=>{q=(q+1)%QS.length;document.getElementById("qtext").textContent=QS[q];};
   // reaction stickers
   document.querySelectorAll("#reactbar .rsticker").forEach(el=>{el.onclick=()=>{const s=el.textContent;showReaction(s,true);sendReaction(s);};});
@@ -181,7 +264,10 @@ function callScreen(m){
     document.getElementById("mutebtn").innerHTML='<i class="ti '+(muted?'ti-microphone-off':'ti-microphone')+'" style="font-size:22px;color:'+(muted?'var(--red)':'var(--navy)')+';"></i>';
     document.getElementById("mutelbl").textContent=muted?"Muted":"Mute";};
   document.getElementById("likebtn").onclick=async()=>{if(!liked.v){liked.v=true;await api("/like",{partner_uid:m.partner_uid});document.getElementById("likebtn").innerHTML='<i class="ti ti-heart-filled" style="font-size:22px;color:var(--gold);"></i>';document.getElementById("likelbl").textContent="Liked";}};
-  document.getElementById("skip").onclick=async()=>{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds});startSearch();};
+  document.getElementById("skip").onclick=async()=>{
+    if(isRP){proposeNewTopic(m);}
+    else{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds});startSearch();}
+  };
   document.getElementById("end").onclick=async()=>{disconnectVoice();clearTimers();await api("/end",{uid:UID,seconds:callSeconds});ratingScreen(m,liked.v);};
   clearTimers();
   const callStart=Date.now();
@@ -208,6 +294,60 @@ function showReaction(sticker,mine){
 function sendReaction(sticker){
   try{if(lkRoom&&lkRoom.localParticipant){const data=new TextEncoder().encode(JSON.stringify({type:"reaction",s:sticker}));lkRoom.localParticipant.publishData(data,{reliable:false});}}catch(e){}
 }
+function sendData(obj){try{if(lkRoom&&lkRoom.localParticipant){lkRoom.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(obj)),{reliable:true});}}catch(e){}}
+
+// ─── Roleplay: change topic mid-call (confirm handshake) ───
+let _curMatch=null,_pendingTopic=null;
+async function proposeNewTopic(m){
+  _curMatch=m;
+  let res;try{res=await api("/roleplay_scenario",{});}catch(e){return;}
+  const sc=res&&res.scenario;if(!sc)return;
+  _pendingTopic=sc;
+  sendData({type:"topic_propose",scenario:sc});
+  // show waiting toast on my screen
+  showTopicToast(`Waiting for ${m.partner_name} to accept the new topic\u2026`,null,null);
+}
+function onTopicProposed(sc){
+  // partner proposed a new topic - show confirm/reject
+  _pendingTopic=sc;
+  showTopicToast(`Your partner suggests a new topic: "${sc.t}". Switch?`,
+    ()=>{sendData({type:"topic_accept",scenario:sc});applyNewTopic(sc);},
+    ()=>{sendData({type:"topic_reject"});_pendingTopic=null;clearTopicToast();});
+}
+function onTopicRejected(){showTopicToast("Partner declined the new topic.",null,null);setTimeout(clearTopicToast,2000);}
+function applyNewTopic(sc){
+  clearTopicToast();_pendingTopic=null;
+  if(!_curMatch)return;
+  // rebuild the roleplay card with new scenario; keep the call/timer running
+  const nm=Object.assign({},_curMatch,{scenario:sc});
+  // flip sides so it's fresh: proposer keeps a, but we can just keep my_side
+  _curMatch=nm;
+  refreshRoleplayCard(sc,nm.my_side);
+}
+function refreshRoleplayCard(sc,mySide){
+  const meSideA=mySide==="a";
+  const myRole=meSideA?sc.a:sc.b, mySecret=meSideA?sc.sa:sc.sb, theirRole=meSideA?sc.b:sc.a;
+  // find the topic card container (first .card after the avatar). We tagged it by id below.
+  const host=document.getElementById("rpcard");
+  if(host){host.innerHTML=`<div style="font-size:10px;letter-spacing:.08em;color:var(--mut2);margin-bottom:6px;">\uD83C\uDFAD ROLEPLAY \u00B7 ${sc.t}</div>
+    <div style="font-size:14px;line-height:1.5;color:var(--navy);margin-bottom:10px;">${sc.s}</div>
+    <div style="background:var(--goldbg);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+      <div style="font-size:11px;color:var(--golddk);font-weight:600;">YOU ARE: ${myRole}</div>
+      <div style="font-size:13px;color:var(--navy);margin-top:4px;">\uD83E\uDD2B Your goal: ${mySecret}</div></div>
+    <div style="font-size:11px;color:var(--mut);">Partner is: ${theirRole}</div>`;}
+}
+function showTopicToast(text,onYes,onNo){
+  clearTopicToast();
+  const t=document.createElement("div");t.id="topictoast";
+  t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);max-width:440px;width:92%;background:var(--navy);color:#fff;border-radius:12px;padding:12px 14px;z-index:9998;box-shadow:0 4px 16px rgba(0,0,0,.25);";
+  t.innerHTML=`<div style="font-size:13px;margin-bottom:${(onYes||onNo)?'10px':'0'};">${text}</div>`;
+  if(onYes||onNo){const row=document.createElement("div");row.style.cssText="display:flex;gap:8px;";
+    const y=document.createElement("button");y.className="btn btn-green";y.style.cssText="padding:8px;font-size:13px;";y.textContent="Switch topic";y.onclick=onYes;
+    const n=document.createElement("button");n.className="btn";n.style.cssText="padding:8px;font-size:13px;";n.textContent="No thanks";n.onclick=onNo;
+    row.appendChild(y);row.appendChild(n);t.appendChild(row);}
+  document.body.appendChild(t);
+}
+function clearTopicToast(){const t=document.getElementById("topictoast");if(t)t.remove();}
 
 async function connectVoice(room,statusFn){
   const setStat=(t)=>{const e=statusFn&&statusFn();if(e)e.textContent=t;};
@@ -216,7 +356,12 @@ async function connectVoice(room,statusFn){
     lkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
     lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{if(track.kind==="audio"){const a=track.attach();a.autoplay=true;document.body.appendChild(a);}});
     lkRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected,()=>{window.__partnerGone&&window.__partnerGone();});
-    lkRoom.on(LivekitClient.RoomEvent.DataReceived,(payload)=>{try{const d=JSON.parse(new TextDecoder().decode(payload));if(d.type==="reaction")showReaction(d.s,false);}catch(e){}});
+    lkRoom.on(LivekitClient.RoomEvent.DataReceived,(payload)=>{try{const d=JSON.parse(new TextDecoder().decode(payload));
+      if(d.type==="reaction")showReaction(d.s,false);
+      else if(d.type==="topic_propose")onTopicProposed(d.scenario);
+      else if(d.type==="topic_reject")onTopicRejected();
+      else if(d.type==="topic_accept")applyNewTopic(d.scenario);
+    }catch(e){}});
     await lkRoom.connect(r.url,r.token);await lkRoom.localParticipant.setMicrophoneEnabled(true);
     setStat("\uD83C\uDF99 Voice connected \u2014 speak!");
   }catch(e){setStat("Voice error \u2014 try Skip");}
@@ -235,7 +380,7 @@ function ratingScreen(m,alreadyLiked,partnerLeft){
     <button class="btn" id="followbtn" style="margin-bottom:10px;"><i class="ti ti-user-plus"></i> Follow ${m.partner_name}</button>
     <button class="btn btn-gold" id="submit" style="margin-bottom:10px;">Submit & find next</button>
     <button class="btn" style="border:none;color:var(--mut);" onclick="go('speak')">Back to home</button></div>`;
-  document.getElementById("followbtn").onclick=async(e)=>{await api("/follow",{uid:UID,target_uid:m.partner_uid});const b=document.getElementById("followbtn");b.innerHTML='<i class="ti ti-check"></i> Following';b.style.background="var(--goldbg)";};
+  document.getElementById("followbtn").onclick=async(e)=>{await api("/follow",{uid:UID,name:NAME,photo:PHOTO,target_uid:m.partner_uid});const b=document.getElementById("followbtn");b.innerHTML='<i class="ti ti-clock"></i> Requested';b.style.background="var(--goldbg)";b.disabled=true;};
   const sb=document.getElementById("stars");
   for(let i=1;i<=5;i++){const s=document.createElement("i");s.className="ti ti-star star";s.onclick=()=>{stars=i;[...sb.children].forEach((c,idx)=>c.classList.toggle("on",idx<i));};sb.appendChild(s);}
   let likeNow=alreadyLiked;
@@ -267,23 +412,46 @@ async function viewProfile(uid){
   if(uid===UID){go("profile");return;}
   clearTimers();document.getElementById("nav").style.display="none";
   scr.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">Loading\u2026</div>`;
-  let res;try{res=await api("/pubprofile",{uid:uid});}catch(e){}
+  let res;try{res=await api("/pubprofile",{uid:uid,viewer:UID});}catch(e){}
   const p=res&&res.profile;
   if(!p){scr.innerHTML='<div class="center" style="padding-top:40px;"><div class="sub">Profile not found</div><button class="btn" style="width:auto;margin-top:14px;padding:10px 24px;" onclick="go(\'ranks\')">Back</button></div>';return;}
-  const dot=p.online?'<span style="color:var(--green);">\u25CF online</span>':(p.busy?'<span style="color:var(--red);">\u25CF in a call</span>':'<span style="color:var(--mut2);">\u25CB offline</span>');
+  const dot=p.online?'<span style="color:var(--green);">\u25CF online now</span>':(p.busy?'<span style="color:var(--red);">\u25CF in a call</span>':'<span style="color:var(--mut2);">last seen '+(p.last_seen||"recently")+'</span>');
+  let followBtn;
+  if(p.follow_state==="following")followBtn=`<button class="btn" id="followbtn2" style="margin-top:10px;background:var(--goldbg);border:none;color:var(--golddk);"><i class="ti ti-check"></i> Following</button>`;
+  else if(p.follow_state==="requested")followBtn=`<button class="btn" id="followbtn2" style="margin-top:10px;border:none;color:var(--mut);" disabled><i class="ti ti-clock"></i> Requested</button>`;
+  else followBtn=`<button class="btn" id="followbtn2" style="margin-top:10px;border:1px solid var(--navy);color:var(--navy);"><i class="ti ti-user-plus"></i> Follow</button>`;
   scr.innerHTML=`<div style="padding-top:6px;"><button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('ranks')">\u2039 Back</button>
     <div class="center">${avatar(p.name,p.photo_url,88)}<h2 style="margin-top:12px;">${p.name}</h2>
-    <div style="font-size:12px;color:var(--gold);margin-top:2px;">\u2605 ${p.avg_rating||"New"} \u00B7 ${lvlName(p.level)} \u00B7 ${dot}</div>
-    ${p.bio?'<div class="sub" style="font-style:italic;margin-top:10px;max-width:260px;">\u201C'+p.bio+'\u201D</div>':''}</div>
+    <div style="font-size:12px;color:var(--gold);margin-top:2px;">\u2605 ${p.avg_rating||"New"} \u00B7 ${lvlName(p.level)}</div>
+    <div style="font-size:11px;margin-top:4px;">${dot}</div>
+    <div class="row" style="gap:24px;margin-top:12px;justify-content:center;">
+      <div style="text-align:center;cursor:pointer;" onclick="followListScreen('${p.uid}','followers','${escapeHtml(p.name)}')"><div style="font-size:18px;font-weight:600;">${p.followers||0}</div><div style="font-size:11px;color:var(--mut);">followers</div></div>
+      <div style="text-align:center;cursor:pointer;" onclick="followListScreen('${p.uid}','following','${escapeHtml(p.name)}')"><div style="font-size:18px;font-weight:600;">${p.following||0}</div><div style="font-size:11px;color:var(--mut);">following</div></div>
+    </div>
+    ${p.bio?'<div class="sub" style="font-style:italic;margin-top:10px;max-width:260px;">\u201C'+escapeHtml(p.bio)+'\u201D</div>':''}</div>
     <div class="row" style="gap:10px;margin:18px 0;"><div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:20px;font-weight:600;">${p.minutes}</div><div style="font-size:11px;color:var(--mut);">minutes</div></div>
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:20px;font-weight:600;">${p.total_calls}</div><div style="font-size:11px;color:var(--mut);">calls</div></div>
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:20px;font-weight:600;">${p.likes_received}</div><div style="font-size:11px;color:var(--mut);">\u2764 likes</div></div></div>
     <button class="btn btn-gold" id="reqbtn" ${p.busy?'style="opacity:.5;"':''}><i class="ti ti-phone"></i> ${p.busy?"In a call now":"Request a call"}</button>
-    <button class="btn" id="rpinvite" style="margin-top:10px;" ${p.busy?'style="opacity:.5;"':''}><i class="ti ti-masks-theater"></i> Invite to Roleplay</button>
-    <button class="btn" id="followbtn2" style="margin-top:10px;border:none;color:var(--navy);"><i class="ti ti-user-plus"></i> Follow</button></div>`;
+    <button class="btn" id="rpinvite" style="margin-top:10px;border:1px solid var(--navy);color:var(--navy);"><i class="ti ti-masks-theater"></i> Invite to Roleplay</button>
+    ${followBtn}</div>`;
   if(!p.busy)document.getElementById("reqbtn").onclick=()=>requestCall(p);
   if(!p.busy)document.getElementById("rpinvite").onclick=()=>requestCall(p,true);
-  document.getElementById("followbtn2").onclick=async()=>{await api("/follow",{uid:UID,target_uid:p.uid});const b=document.getElementById("followbtn2");b.innerHTML='<i class="ti ti-check"></i> Following';b.style.color="var(--gold)";};
+  const fb=document.getElementById("followbtn2");
+  if(p.follow_state==="none"&&fb)fb.onclick=async()=>{const r=await api("/follow",{uid:UID,name:NAME,photo:PHOTO,target_uid:p.uid});fb.disabled=true;fb.innerHTML='<i class="ti ti-clock"></i> Requested';fb.style.border="none";fb.style.color="var(--mut)";};
+}
+
+async function followListScreen(uid,which,name){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="viewProfile('${uid}')">\u2039 Back</button><h2>${name}'s ${which}</h2>
+    <div id="fll" style="margin-top:14px;"><div class="sub" style="text-align:center;padding:20px;">Loading\u2026</div></div>`;
+  const ep=which==="followers"?"/followers":"/friends";
+  const key=which==="followers"?"followers":"friends";
+  let res;try{res=await api(ep,{uid:uid});}catch(e){}
+  const list=(res&&res[key])||[];
+  const box=document.getElementById("fll");
+  if(!list.length){box.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">No ${which} yet.</div>`;return;}
+  box.innerHTML=list.map(f=>`<div class="row" style="padding:10px 8px;border-bottom:1px solid var(--line);cursor:pointer;" onclick="viewProfile('${f.uid}')">${avatar(f.name,f.photo_url,38)}<div style="flex:1;"><div style="font-size:14px;font-weight:600;">${escapeHtml(f.name)}</div><div style="font-size:11px;color:var(--mut);">${lvlName(f.level)}</div></div><i class="ti ti-chevron-right" style="color:var(--mut2);"></i></div>`).join("");
 }
 
 async function requestCall(p,roleplay){
@@ -313,6 +481,40 @@ function incomingScreen(r){
 }
 
 const ADMIN_UID="960055324";
+
+// ─── Notifications ───
+async function refreshBell(){
+  try{const r=await api("/notif_count",{uid:UID});const dot=document.getElementById("belldot");if(dot)dot.style.display=(r.count>0)?"block":"none";}catch(e){}
+}
+setInterval(refreshBell,45000);refreshBell();
+
+async function notifScreen(){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('speak')">\u2039 Back</button><h2>Notifications</h2>
+    <div id="ntlist" style="margin-top:14px;"><div class="sub" style="text-align:center;padding:20px;">Loading\u2026</div></div>`;
+  await api("/notif_seen",{uid:UID});refreshBell();
+  let res;try{res=await api("/notifs",{uid:UID});}catch(e){}
+  const list=(res&&res.notifs)||[];
+  const box=document.getElementById("ntlist");
+  if(!list.length){box.innerHTML=`<div class="sub" style="text-align:center;padding:30px;">No notifications yet.</div>`;return;}
+  box.innerHTML=list.map(n=>{
+    let txt="",icon="ti-bell",act="";
+    if(n.kind==="like"){txt="liked you";icon="ti-heart";}
+    else if(n.kind==="rating"){txt=`rated you ${n.extra||""}\u2B50`;icon="ti-star";}
+    else if(n.kind==="follow_accepted"){txt="accepted your follow request";icon="ti-user-check";}
+    else if(n.kind==="review_approved"){txt="Your review was approved \u2705";icon="ti-message-check";}
+    else if(n.kind==="follow_request"){txt="wants to follow you";icon="ti-user-plus";
+      if(n.pending){act=`<div class="row" style="gap:6px;margin-top:6px;"><button class="btn btn-green" style="padding:6px 14px;font-size:12px;width:auto;" onclick="acceptFollow('${n.from_uid}',this)">Accept</button><button class="btn" style="padding:6px 14px;font-size:12px;width:auto;" onclick="rejectFollow('${n.from_uid}',this)">Reject</button></div>`;}
+      else{txt="wants to follow you (handled)";}}
+    const who=n.kind==="review_approved"?"":`<b>${escapeHtml(n.from_name||"Someone")}</b> `;
+    return `<div class="row" style="align-items:flex-start;gap:10px;padding:11px 8px;border-bottom:1px solid var(--line);">
+      ${n.kind==="review_approved"?'<div class="cbtn" style="width:38px;height:38px;"><i class="ti '+icon+'" style="color:var(--gold);"></i></div>':avatar(n.from_name,n.from_photo,38)}
+      <div style="flex:1;"><div style="font-size:13px;color:var(--navy);"><i class="ti ${icon}" style="color:var(--gold);margin-right:4px;"></i>${who}${txt}</div><div style="font-size:11px;color:var(--mut2);">${n.created||""}</div>${act}</div></div>`;
+  }).join("");
+}
+async function acceptFollow(follower,btn){await api("/follow_accept",{uid:UID,name:NAME,photo:PHOTO,follower_uid:follower});btn.parentElement.innerHTML='<span class="sub" style="color:var(--green);">Accepted \u2713</span>';}
+async function rejectFollow(follower,btn){await api("/follow_reject",{uid:UID,follower_uid:follower});btn.parentElement.innerHTML='<span class="sub">Rejected</span>';}
+
 async function chatScreen(){
   document.getElementById("nav").style.display="flex";
   scr.innerHTML=`<h2>Community</h2><div class="sub">Say hi, plan a session, share tips</div>
@@ -367,6 +569,10 @@ async function profileScreen(){
   if(p.level)myLevel=p.level;
   scr.innerHTML=`<div class="center" style="margin-bottom:16px;">${avatar(p.name||NAME,PHOTO,76)}
     <h2 style="margin-top:10px;">${p.name||NAME}</h2><div style="font-size:13px;color:var(--gold);">\u2605 ${p.avg_rating||"New"} \u00B7 ${lvlName(p.level||myLevel)}</div>
+    <div class="row" style="gap:24px;margin-top:10px;justify-content:center;">
+      <div style="text-align:center;cursor:pointer;" onclick="followListScreen('${UID}','followers','You')"><div style="font-size:18px;font-weight:600;">${p.followers||0}</div><div style="font-size:11px;color:var(--mut);">followers</div></div>
+      <div style="text-align:center;cursor:pointer;" onclick="followListScreen('${UID}','following','You')"><div style="font-size:18px;font-weight:600;">${p.following||0}</div><div style="font-size:11px;color:var(--mut);">following</div></div>
+    </div>
     ${p.bio?'<div class="sub" style="font-style:italic;margin-top:8px;max-width:260px;">\u201C'+p.bio+'\u201D</div>':''}</div>
     <div class="row" style="gap:10px;margin-bottom:16px;">
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.minutes||0}</div><div style="font-size:11px;color:var(--mut);">minutes</div></div>
@@ -406,6 +612,29 @@ function settingsScreen(){
   api("/profile",{uid:UID}).then(r=>{if(r.profile&&r.profile.bio)document.getElementById("bio").value=r.profile.bio;});
   document.getElementById("savebio").onclick=async()=>{await api("/setbio",{uid:UID,bio:document.getElementById("bio").value});document.getElementById("saved").textContent="Saved!";};
 }
+
+// ─── Auto-update: check version, reload on safe screens when it changes ───
+let CURRENT_VERSION=null, currentTab="speak", inCall=false;
+async function checkVersion(){
+  try{const r=await api("/version",{});
+    if(CURRENT_VERSION===null){CURRENT_VERSION=r.version;return;}
+    if(r.version!==CURRENT_VERSION){
+      if(!inCall && (currentTab==="speak"||currentTab==="profile")){location.reload();}
+      else{showUpdateBanner();}
+    }
+  }catch(e){}
+}
+function showUpdateBanner(){
+  if(document.getElementById("updbanner"))return;
+  const b=document.createElement("div");
+  b.id="updbanner";
+  b.style.cssText="position:fixed;top:0;left:50%;transform:translateX(-50%);max-width:480px;width:100%;background:var(--gold);color:#fff;text-align:center;padding:10px;font-size:13px;font-weight:600;z-index:9999;cursor:pointer;";
+  b.textContent="🔄 Update available — tap to refresh";
+  b.onclick=()=>location.reload();
+  document.body.appendChild(b);
+}
+setInterval(checkVersion,60000);
+checkVersion();
 
 go("speak");
 </script>
