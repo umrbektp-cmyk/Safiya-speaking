@@ -148,8 +148,21 @@ function callScreen(m){
   document.getElementById("skip").onclick=async()=>{disconnectVoice();clearTimers();await api("/skip",{uid:UID,seconds:callSeconds});startSearch();};
   document.getElementById("end").onclick=async()=>{disconnectVoice();clearTimers();await api("/end",{uid:UID,seconds:callSeconds});ratingScreen(m,liked.v);};
   clearTimers();
-  countTimer=setInterval(()=>{callSeconds++;const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
-  statusTimer=setInterval(async()=>{try{const st=await api("/status",{uid:UID});if(!st.active){disconnectVoice();clearTimers();ratingScreen(m,liked.v,true);}}catch(e){}},2500);
+  const callStart=Date.now();
+  countTimer=setInterval(()=>{callSeconds=Math.floor((Date.now()-callStart)/1000);const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
+  let miss=0;
+  statusTimer=setInterval(async()=>{
+    try{const st=await api("/status",{uid:UID});
+      if(!st.active){
+        miss++;
+        // End only if server says gone AND voice link is actually down (real leave, not a server restart / blip)
+        const voiceUp = lkRoom && lkRoom.state==="connected" && lkRoom.remoteParticipants && lkRoom.remoteParticipants.size>0;
+        if(miss>=4 && !voiceUp){disconnectVoice();clearTimers();ratingScreen(m,liked.v,true);}
+      } else {miss=0;}
+    }catch(e){/* network blip - ignore */}
+  },3000);
+  // Real "partner left" signal: their audio participant disconnects from the room
+  window.__partnerGone=()=>{if(callSeconds>2){disconnectVoice();clearTimers();window.__partnerGone=null;ratingScreen(m,liked.v,true);}};
   connectVoice(m.room,()=>document.getElementById("vstat"));
 }
 
@@ -159,6 +172,7 @@ async function connectVoice(room,statusFn){
   try{const r=await api("/token",{uid:UID,name:NAME,room:room});if(!r.token){setStat("Voice unavailable");return;}
     lkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
     lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track)=>{if(track.kind==="audio"){const a=track.attach();a.autoplay=true;document.body.appendChild(a);}});
+    lkRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected,()=>{window.__partnerGone&&window.__partnerGone();});
     await lkRoom.connect(r.url,r.token);await lkRoom.localParticipant.setMicrophoneEnabled(true);
     setStat("\uD83C\uDF99 Voice connected \u2014 speak!");
   }catch(e){setStat("Voice error \u2014 try Skip");}

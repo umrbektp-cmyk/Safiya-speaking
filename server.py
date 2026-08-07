@@ -12,6 +12,24 @@ LIVEKIT_URL    = os.environ.get("LIVEKIT_URL", "")
 LIVEKIT_KEY    = os.environ.get("LIVEKIT_KEY", "")
 LIVEKIT_SECRET = os.environ.get("LIVEKIT_SECRET", "")
 DATABASE_URL   = os.environ.get("DATABASE_URL", "")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app, for buttons
+
+import urllib.request, urllib.parse, json as _json
+
+def tg_send(chat_id, text, button_text=None, button_url=None):
+    """Send a Telegram message via the bot. Silent no-op if token missing."""
+    if not TELEGRAM_TOKEN or not chat_id or str(chat_id).startswith("guest"):
+        return
+    try:
+        payload = {"chat_id": str(chat_id), "text": text}
+        if button_text and button_url:
+            payload["reply_markup"] = _json.dumps({"inline_keyboard": [[{"text": button_text, "url": button_url}]]})
+        data = urllib.parse.urlencode(payload).encode()
+        req = urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data=data)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print("tg_send error:", str(e)[:150])
 
 
 def make_token(identity, name, room):
@@ -39,6 +57,43 @@ def _run(sql, params=None):
         conn.rollback(); print("DB ERROR:", str(e)[:200], "| SQL:", sql[:80])
     finally:
         conn.close()
+
+
+
+INVITE_LINES = [
+    "{name} is online and looking for a speaking partner 👀",
+    "Practice makes perfect — someone's ready to chat right now 🎤",
+    "Got 5 minutes? A partner is waiting in the lobby 🔥",
+    "Your English won't practice itself 😄 Jump into a quick call!",
+    "{count} learners are online now — come say hello 👋",
+    "Quick speaking session? Someone's online and ready 💬",
+]
+
+def _reminder_loop():
+    import random as _r
+    while True:
+        time.sleep(900)  # 15 minutes
+        if not (TELEGRAM_TOKEN and APP_URL and DATABASE_URL):
+            continue
+        try:
+            online = count_online(within=3600)  # active in last hour
+            # pull a sample of users active in the last 3 days to nudge
+            conn = get_db()
+            with conn.cursor() as cur:
+                cur.execute("SELECT uid,name FROM sp_users WHERE last_seen > %s AND uid NOT LIKE 'guest%%' ORDER BY random() LIMIT 30",
+                            (time.time()-3*86400,))
+                targets = cur.fetchall()
+            conn.close()
+            names = [t[1] for t in targets if t[1]]
+            for uid, name in targets:
+                line = _r.choice(INVITE_LINES)
+                other = _r.choice(names) if names else "Someone"
+                msg = line.format(name=other, count=max(online,2))
+                tg_send(uid, msg, "🎤 Start practicing", APP_URL)
+                time.sleep(0.05)
+            print(f"reminder_loop: nudged {len(targets)} users")
+        except Exception as e:
+            print("reminder_loop error:", str(e)[:150])
 
 def init_db():
     if not DATABASE_URL:
@@ -373,6 +428,10 @@ def call_request():
         if target in matches: return jsonify(ok=False, reason="busy")
         room=f"req_{frm}_{target}_{int(time.time())}"
         requests_in[target]={"from_uid":frm,"from_name":frm_name,"from_photo":frm_photo,"from_level":frm_level,"room":room,"ts":time.time()}
+    # Notify the target through the bot so they see it even if the app is closed
+    if APP_URL:
+        tg_send(target, f"🎤 {frm_name} wants to practice English with you! Open the app to accept.",
+                "Open & accept", APP_URL)
     return jsonify(ok=True, room=room)
 
 @app.route("/request_check", methods=["POST"])
@@ -418,6 +477,7 @@ def index():
 
 init_db()
 threading.Thread(target=_reaper, daemon=True).start()
+threading.Thread(target=_reminder_loop, daemon=True).start()
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
