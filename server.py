@@ -43,6 +43,8 @@ def make_token(identity, name, room):
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from scenarios import SCENARIOS
+import random
 
 def get_db():
     return psycopg2.connect(DATABASE_URL)
@@ -109,6 +111,10 @@ def init_db():
         seconds INTEGER DEFAULT 0, level TEXT, ended_at TEXT)""")
     _run("ALTER TABLE sp_users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''")
     _run("ALTER TABLE sp_users ADD COLUMN IF NOT EXISTS last_seen DOUBLE PRECISION DEFAULT 0")
+    _run("""CREATE TABLE IF NOT EXISTS sp_follows (
+        follower TEXT, following TEXT, created TEXT, PRIMARY KEY (follower, following))""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_messages (
+        id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, text TEXT, created TEXT, ts DOUBLE PRECISION)""")
     print("init_db complete")
 
 def upsert_user(uid, name, photo_url, level=None):
@@ -225,6 +231,75 @@ def count_online(within=70):
             return cur.fetchone()[0]
 
 
+# ─── Follows + Community messages ────────────────────────────────────────────
+def follow_user(follower, following):
+    if not DATABASE_URL or follower==following: return
+    _run("INSERT INTO sp_follows (follower,following,created) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+         (str(follower),str(following),time.strftime("%Y-%m-%d")))
+
+def unfollow_user(follower, following):
+    _run("DELETE FROM sp_follows WHERE follower=%s AND following=%s",(str(follower),str(following)))
+
+def is_following(follower, following):
+    if not DATABASE_URL: return False
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM sp_follows WHERE follower=%s AND following=%s",(str(follower),str(following)))
+            return cur.fetchone() is not None
+    except: return False
+    finally: conn.close()
+
+def follower_count(uid):
+    if not DATABASE_URL: return 0
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM sp_follows WHERE following=%s",(str(uid),))
+            return cur.fetchone()[0]
+    except: return 0
+    finally: conn.close()
+
+def get_following(uid):
+    """People I follow, with their online status + profile."""
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""SELECT u.uid,u.name,u.photo_url,u.level,u.last_seen
+                FROM sp_follows f JOIN sp_users u ON u.uid=f.following
+                WHERE f.follower=%s ORDER BY u.last_seen DESC""",(str(uid),))
+            rows=[]
+            now=time.time()
+            with lock:
+                busy_set=set(matches.keys())
+            for r in cur.fetchall():
+                r=dict(r); r["online"]=(r.get("last_seen",0) or 0)>now-70; r["busy"]=r["uid"] in busy_set
+                r.pop("last_seen",None); rows.append(r)
+            return rows
+    except Exception as e:
+        print("get_following error:",str(e)[:120]); return []
+    finally: conn.close()
+
+def post_message(uid,name,photo,text):
+    if not DATABASE_URL or not text.strip(): return
+    _run("INSERT INTO sp_messages (uid,name,photo_url,text,created,ts) VALUES (%s,%s,%s,%s,%s,%s)",
+         (str(uid),name,photo,text[:300],time.strftime("%m/%d %H:%M"),time.time()))
+
+def get_messages(limit=50):
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id,uid,name,photo_url,text,created FROM sp_messages ORDER BY id DESC LIMIT %s",(limit,))
+            return [dict(r) for r in reversed(cur.fetchall())]
+    except: return []
+    finally: conn.close()
+
+def delete_message(mid):
+    _run("DELETE FROM sp_messages WHERE id=%s",(int(mid),))
+
+
 # ─── In-memory matchmaking + call requests ──────────────────────────────────
 waiting = []          # list of {uid,name,photo,level,only_level,ts}
 matches = {}          # uid -> {partner_uid,partner_name,partner_photo,partner_level,room,ts}
@@ -243,11 +318,12 @@ def _remember(a,b):
 def _recently(a,b):
     return b in recent.get(a,{}) and (time.time()-recent[a][b])<RECENT_TTL
 
-def _make_match(u1, u2):
+def _make_match(u1, u2, room=None, mode="free", scenario=None):
     """u1,u2 are dicts with uid,name,photo,level. Returns room."""
-    room = f"sp_{u1['uid']}_{u2['uid']}_{int(time.time())}"
-    matches[u1["uid"]] = {"partner_uid":u2["uid"],"partner_name":u2["name"],"partner_photo":u2.get("photo",""),"partner_level":u2.get("level",""),"room":room,"ts":time.time()}
-    matches[u2["uid"]] = {"partner_uid":u1["uid"],"partner_name":u1["name"],"partner_photo":u1.get("photo",""),"partner_level":u1.get("level",""),"room":room,"ts":time.time()}
+    if not room: room = f"sp_{u1['uid']}_{u2['uid']}_{int(time.time())}"
+    base={"room":room,"ts":time.time(),"mode":mode,"scenario":scenario}
+    matches[u1["uid"]] = dict(base, partner_uid=u2["uid"],partner_name=u2["name"],partner_photo=u2.get("photo",""),partner_level=u2.get("level",""), my_side="a")
+    matches[u2["uid"]] = dict(base, partner_uid=u1["uid"],partner_name=u1["name"],partner_photo=u1.get("photo",""),partner_level=u1.get("level",""), my_side="b")
     _remember(u1["uid"], u2["uid"])
     return room
 
@@ -263,29 +339,31 @@ def join():
     uid = str(d.get("uid","")).strip(); name=(d.get("name") or "Partner").strip()
     photo = d.get("photo") or ""; level=(d.get("level") or "beginner").strip()
     only_level = bool(d.get("only_level"))
+    mode = (d.get("mode") or "free").strip()  # "free" or "roleplay"
     if not uid: return jsonify(error="no uid"), 400
     upsert_user(uid, name, photo, level)
     with lock:
         if uid in matches:
             m=matches[uid]; return jsonify(matched=True, **_mpayload(m))
         _clean(uid)
-        me = {"uid":uid,"name":name,"photo":photo,"level":level,"only_level":only_level,"ts":time.time()}
+        me = {"uid":uid,"name":name,"photo":photo,"level":level,"only_level":only_level,"mode":mode,"ts":time.time()}
         partner = None
         for w in waiting:
             if w["uid"]==uid or _recently(uid,w["uid"]): continue
-            # level filter: respect if EITHER side wants only their level
+            if w.get("mode","free")!=mode: continue  # roleplay matches roleplay, free matches free
             if (only_level or w.get("only_level")) and w.get("level")!=level: continue
             partner=w; break
         if partner:
             waiting.remove(partner)
-            _make_match(me, partner)
+            sc = random.choice(SCENARIOS) if mode=="roleplay" else None
+            _make_match(me, partner, mode=mode, scenario=sc)
             m=matches[uid]; return jsonify(matched=True, **_mpayload(m))
         else:
             waiting.append(me)
             return jsonify(matched=False, queue_pos=len(waiting))
 
 def _mpayload(m):
-    return {"partner_name":m["partner_name"],"partner_uid":m["partner_uid"],"partner_photo":m.get("partner_photo",""),"partner_level":m.get("partner_level",""),"room":m["room"]}
+    return {"partner_name":m["partner_name"],"partner_uid":m["partner_uid"],"partner_photo":m.get("partner_photo",""),"partner_level":m.get("partner_level",""),"room":m["room"],"mode":m.get("mode","free"),"scenario":m.get("scenario"),"my_side":m.get("my_side","a")}
 
 
 @app.route("/poll", methods=["POST"])
@@ -458,9 +536,75 @@ def request_respond():
         me={"uid":uid,"name":name,"photo":photo,"level":level}
         frm={"uid":r["from_uid"],"name":r["from_name"],"photo":r["from_photo"],"level":r["from_level"]}
         _clean(uid); _clean(r["from_uid"])
-        room=_make_match(me, frm)
+        # frm is side "a" (inviter), me is side "b"
+        _make_match(frm, me, room=r.get("room"), mode=r.get("mode","free"), scenario=r.get("scenario"))
         return jsonify(ok=True, accepted=True, **_mpayload(matches[uid]))
 
+
+# ─── Follow / Friends endpoints ──────────────────────────────────────────────
+@app.route("/follow", methods=["POST"])
+def ep_follow():
+    d=request.get_json(force=True)
+    follow_user(str(d.get("uid","")).strip(), str(d.get("target_uid","")).strip())
+    return jsonify(ok=True)
+
+@app.route("/unfollow", methods=["POST"])
+def ep_unfollow():
+    d=request.get_json(force=True)
+    unfollow_user(str(d.get("uid","")).strip(), str(d.get("target_uid","")).strip())
+    return jsonify(ok=True)
+
+@app.route("/friends", methods=["POST"])
+def ep_friends():
+    d=request.get_json(force=True)
+    return jsonify(friends=get_following(str(d.get("uid","")).strip()))
+
+# ─── Community chat endpoints ────────────────────────────────────────────────
+@app.route("/messages", methods=["POST"])
+def ep_messages():
+    return jsonify(messages=get_messages())
+
+@app.route("/post", methods=["POST"])
+def ep_post():
+    d=request.get_json(force=True)
+    uid=str(d.get("uid","")).strip(); name=(d.get("name") or "Guest").strip()
+    photo=d.get("photo") or ""; text=(d.get("text") or "").strip()
+    if uid and text: post_message(uid,name,photo,text)
+    return jsonify(ok=True, messages=get_messages())
+
+@app.route("/delmsg", methods=["POST"])
+def ep_delmsg():
+    d=request.get_json(force=True)
+    uid=str(d.get("uid","")).strip(); mid=d.get("id")
+    # only admin or the message author can delete
+    ADMIN="960055324"
+    if uid==ADMIN and mid: delete_message(mid)
+    return jsonify(ok=True, messages=get_messages())
+
+# ─── Roleplay endpoints ──────────────────────────────────────────────────────
+@app.route("/roleplay_scenario", methods=["POST"])
+def ep_roleplay_scenario():
+    """Return a random scenario (used when a roleplay match is made)."""
+    sc=random.choice(SCENARIOS)
+    return jsonify(scenario=sc)
+
+# roleplay invite reuses request system but tags mode=roleplay
+@app.route("/roleplay_invite", methods=["POST"])
+def ep_roleplay_invite():
+    d=request.get_json(force=True)
+    frm=str(d.get("uid","")).strip(); frm_name=(d.get("name") or "Someone").strip()
+    frm_photo=d.get("photo") or ""; target=str(d.get("target_uid","")).strip()
+    if not frm or not target: return jsonify(error="missing"),400
+    sc=random.choice(SCENARIOS)
+    with lock:
+        if target in matches: return jsonify(ok=False, reason="busy")
+        room=f"rp_{frm}_{target}_{int(time.time())}"
+        requests_in[target]={"from_uid":frm,"from_name":frm_name,"from_photo":frm_photo,"from_level":"",
+                             "room":room,"ts":time.time(),"mode":"roleplay","scenario":sc}
+    if BTN_URL:
+        tg_send(target, f"🎭 {frm_name} invited you to a Roleplay on Safiya Speaking! Open the app to join.",
+                "Open & join", BTN_URL)
+    return jsonify(ok=True, room=room)
 
 def _reaper():
     while True:
