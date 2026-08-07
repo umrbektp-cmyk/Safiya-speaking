@@ -13,7 +13,9 @@ LIVEKIT_KEY    = os.environ.get("LIVEKIT_KEY", "")
 LIVEKIT_SECRET = os.environ.get("LIVEKIT_SECRET", "")
 DATABASE_URL   = os.environ.get("DATABASE_URL", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app, for buttons
+APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
+MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
+BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
 
 import urllib.request, urllib.parse, json as _json
 
@@ -73,7 +75,7 @@ def _reminder_loop():
     import random as _r
     while True:
         time.sleep(900)  # 15 minutes
-        if not (TELEGRAM_TOKEN and APP_URL and DATABASE_URL):
+        if not (TELEGRAM_TOKEN and BTN_URL and DATABASE_URL):
             continue
         try:
             online = count_online(within=3600)  # active in last hour
@@ -89,7 +91,7 @@ def _reminder_loop():
                 line = _r.choice(INVITE_LINES)
                 other = _r.choice(names) if names else "Someone"
                 msg = line.format(name=other, count=max(online,2))
-                tg_send(uid, msg, "🎤 Start practicing", APP_URL)
+                tg_send(uid, msg, "🎤 Start practicing", BTN_URL)
                 time.sleep(0.05)
             print(f"reminder_loop: nudged {len(targets)} users")
         except Exception as e:
@@ -431,7 +433,7 @@ def call_request():
     # Notify the target through the bot so they see it even if the app is closed
     if APP_URL:
         tg_send(target, f"🎤 {frm_name} wants to practice English with you! Open the app to accept.",
-                "Open & accept", APP_URL)
+                "Open & accept", BTN_URL)
     return jsonify(ok=True, room=room)
 
 @app.route("/request_check", methods=["POST"])
