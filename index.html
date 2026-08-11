@@ -96,6 +96,11 @@ async function speakHome(){
       <button class="btn btn-gold" id="freebtn" style="padding:16px;"><i class="ti ti-microphone"></i> Free talk</button>
       <button class="btn" id="rpbtn" style="padding:16px;border:1px solid var(--navy);color:var(--navy);"><i class="ti ti-masks-theater"></i> Roleplay</button>
     </div>
+    <div id="solobanner" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#1a2b4a,#2563eb);border-radius:14px;padding:16px;text-align:left;cursor:pointer;">
+      <div style="font-size:10px;color:#fde047;font-weight:700;letter-spacing:.05em;">🎯 NO PARTNER? PRACTICE ALONE</div>
+      <div style="font-size:15px;color:#fff;font-weight:700;margin:5px 0;">Spin an IELTS question</div>
+      <div style="font-size:11px;color:#b0bdd0;">Part 1, 2, 3 &amp; random topics — answer out loud</div>
+    </div>
     <div class="card" style="width:100%;margin-top:14px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;">
       <div style="text-align:left;"><div style="font-size:13px;font-weight:600;">My level only</div><div style="font-size:11px;color:var(--mut);">${onlyLevel?"On \u00B7 "+lvlName(myLevel):"Off \u00B7 match all levels"}</div></div>
       <div class="toggle" id="oltog" style="background:${onlyLevel?'var(--gold)':'#e0d6b8'};"><div class="knob" style="${onlyLevel?'right:3px;':'left:3px;'}"></div></div>
@@ -107,6 +112,7 @@ async function speakHome(){
     </div></div>`;
   document.getElementById("freebtn").onclick=()=>startSearch("free");
   document.getElementById("rpbtn").onclick=()=>startSearch("roleplay");
+  document.getElementById("solobanner").onclick=soloHome;
   document.getElementById("oltog").onclick=()=>{onlyLevel=!onlyLevel;localStorage.setItem("sp_only",onlyLevel?"1":"0");speakHome();};
   document.getElementById("sharexp").onclick=shareExperienceScreen;
   loadTestimonials();
@@ -274,11 +280,13 @@ function callScreen(m){
   countTimer=setInterval(()=>{callSeconds=Math.floor((Date.now()-callStart)/1000);const e=document.getElementById("ct");if(!e){clearInterval(countTimer);return;}e.textContent=fmt(callSeconds);},1000);
   let miss=0;
   statusTimer=setInterval(async()=>{
-    try{const st=await api("/status",{uid:UID});
+    try{const st=await api("/status",{uid:UID,seconds:callSeconds});
       if(!st.active){miss++;const voiceUp=lkRoom&&lkRoom.state==="connected"&&lkRoom.remoteParticipants&&lkRoom.remoteParticipants.size>0;if(miss>=4&&!voiceUp){disconnectVoice();clearTimers();ratingScreen(m,liked.v,true);}}else{miss=0;}
     }catch(e){}
   },3000);
   window.__partnerGone=()=>{if(callSeconds>2){disconnectVoice();clearTimers();window.__partnerGone=null;ratingScreen(m,liked.v,true);}};
+  // Safety net: if the app is closed/backgrounded mid-call, save minutes immediately via a beacon
+  window.__saveBeacon=()=>{try{if(inCall&&callSeconds>2){const blob=new Blob([JSON.stringify({uid:UID,seconds:callSeconds})],{type:"application/json"});navigator.sendBeacon(API+"/status",blob);}}catch(e){}};
   connectVoice(m.room,()=>document.getElementById("vstat"));
 }
 
@@ -377,22 +385,89 @@ function ratingScreen(m,alreadyLiked,partnerLeft){
     <div class="sub" style="margin-bottom:12px;">How was your partner?</div>
     <div id="stars" style="display:flex;gap:8px;margin-bottom:16px;"></div>
     <div class="row" style="gap:8px;margin-bottom:14px;"><div class="cbtn" id="rlike" style="${alreadyLiked?'background:var(--goldbg);':''}"><i class="ti ${alreadyLiked?'ti-heart-filled':'ti-heart'}" style="font-size:22px;color:var(--gold);"></i></div><span class="sub">${alreadyLiked?"Liked":"Tap to like"}</span></div>
+    <div class="sub" style="margin-bottom:8px;">Send a compliment (optional)</div>
+    <div id="kudoschips" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:16px;"></div>
     <button class="btn" id="followbtn" style="margin-bottom:10px;"><i class="ti ti-user-plus"></i> Follow ${m.partner_name}</button>
     <button class="btn btn-gold" id="submit" style="margin-bottom:10px;">Submit & find next</button>
     <button class="btn" style="border:none;color:var(--mut);" onclick="go('speak')">Back to home</button></div>`;
+  const KTAGS=[{id:"pronunciation",label:"Great pronunciation",emoji:"👏"},{id:"confident",label:"Confident",emoji:"💪"},{id:"kind",label:"Kind partner",emoji:"😊"},{id:"listener",label:"Good listener",emoji:"👂"},{id:"fun",label:"Fun to talk to",emoji:"🎉"},{id:"smart",label:"Smart ideas",emoji:"🧠"}];
+  const pickedKudos=new Set();
+  const kc=document.getElementById("kudoschips");
+  KTAGS.forEach(t=>{const chip=document.createElement("div");chip.style.cssText="background:var(--card);border:1px solid var(--line);border-radius:20px;padding:7px 12px;font-size:12px;cursor:pointer;color:var(--navy);";chip.innerHTML=`${t.emoji} ${t.label}`;chip.onclick=()=>{if(pickedKudos.has(t.id)){pickedKudos.delete(t.id);chip.style.background="var(--card)";chip.style.borderColor="var(--line)";chip.style.color="var(--navy)";}else{pickedKudos.add(t.id);chip.style.background="var(--goldbg)";chip.style.borderColor="var(--gold)";chip.style.color="var(--golddk)";}};kc.appendChild(chip);});
   document.getElementById("followbtn").onclick=async(e)=>{await api("/follow",{uid:UID,name:NAME,photo:PHOTO,target_uid:m.partner_uid});const b=document.getElementById("followbtn");b.innerHTML='<i class="ti ti-clock"></i> Requested';b.style.background="var(--goldbg)";b.disabled=true;};
   const sb=document.getElementById("stars");
   for(let i=1;i<=5;i++){const s=document.createElement("i");s.className="ti ti-star star";s.onclick=()=>{stars=i;[...sb.children].forEach((c,idx)=>c.classList.toggle("on",idx<i));};sb.appendChild(s);}
   let likeNow=alreadyLiked;
   document.getElementById("rlike").onclick=()=>{likeNow=!likeNow;document.getElementById("rlike").innerHTML='<i class="ti '+(likeNow?'ti-heart-filled':'ti-heart')+'" style="font-size:22px;color:var(--gold);"></i>';document.getElementById("rlike").style.background=likeNow?'var(--goldbg)':'var(--card)';};
-  document.getElementById("submit").onclick=async()=>{await api("/rate",{partner_uid:m.partner_uid,stars:stars,like:(likeNow&&!alreadyLiked)});startSearch();};
+  document.getElementById("submit").onclick=async()=>{await api("/rate",{partner_uid:m.partner_uid,stars:stars,like:(likeNow&&!alreadyLiked)});if(pickedKudos.size){api("/kudos_send",{uid:UID,target_uid:m.partner_uid,tags:[...pickedKudos]});}startSearch();};
 }
 
 async function ranksScreen(){
-  scr.innerHTML=`<h2>Leaderboard</h2><div class="sub">Top learners in the community</div>
+  scr.innerHTML=`<h2>Ranks</h2><div class="sub">Top learners in the community</div>
+    <div id="duoweek"></div>
+    <div id="weeklyrank"></div>
     <div class="row" style="gap:6px;margin:16px 0;"><div class="tab on" data-k="minutes" onclick="loadBoard('minutes',this)">Top speakers</div><div class="tab" data-k="likes" onclick="loadBoard('likes',this)">Most liked</div><div class="tab" data-k="rating" onclick="loadBoard('rating',this)">Top rated</div></div>
     <div id="board"><div class="sub" style="text-align:center;padding:30px;">Loading\u2026</div></div>`;
   loadBoard("minutes");
+  loadDuoWeek();
+  loadWeeklyRank();
+}
+async function loadDuoWeek(){
+  let res;try{res=await api("/duo_of_week",{});}catch(e){}
+  const duo=res&&res.duo;const box=document.getElementById("duoweek");if(!box)return;
+  if(!duo){box.innerHTML="";return;}
+  box.innerHTML=`<div style="background:linear-gradient(135deg,#1a2b4a,#2563eb);border-radius:16px;padding:16px;margin-top:14px;color:#fff;">
+    <div style="font-size:11px;color:#fde047;font-weight:700;letter-spacing:.05em;margin-bottom:10px;">🏆 DUO OF THE WEEK</div>
+    <div class="row" style="justify-content:center;gap:14px;">
+      <div style="text-align:center;cursor:pointer;" onclick="viewProfile('${duo.a}')">${avatar(duo.a_name,duo.a_photo,52)}<div style="font-size:12px;font-weight:600;margin-top:4px;">${escapeHtml(duo.a_name||"")}</div></div>
+      <div style="align-self:center;font-size:20px;">🤝</div>
+      <div style="text-align:center;cursor:pointer;" onclick="viewProfile('${duo.b}')">${avatar(duo.b_name,duo.b_photo,52)}<div style="font-size:12px;font-weight:600;margin-top:4px;">${escapeHtml(duo.b_name||"")}</div></div>
+    </div>
+    <div style="text-align:center;font-size:13px;color:#fde047;font-weight:600;margin-top:10px;">${duo.minutes} minutes together this week 🎙️</div></div>`;
+}
+async function loadWeeklyRank(){
+  let res;try{res=await api("/weekly_rank",{uid:UID});}catch(e){}
+  const rk=res&&res.rank;const box=document.getElementById("weeklyrank");if(!box)return;
+  if(!rk){box.innerHTML="";return;}
+  box.innerHTML=`<div style="background:var(--goldbg);border-radius:14px;padding:14px;margin-top:12px;display:flex;align-items:center;justify-content:space-between;">
+    <div><div style="font-size:15px;font-weight:700;color:var(--navy);">You ranked #${rk.rank} this week! 🎉</div><div style="font-size:12px;color:var(--mut);">${rk.minutes} minutes · out of ${rk.total} learners</div></div>
+    <button class="btn" id="wrshare" style="width:auto;padding:8px 14px;font-size:12px;background:linear-gradient(135deg,#38bdf8,#2563eb);color:#fff;border:none;"><i class="ti ti-share"></i></button></div>`;
+  const wr=document.getElementById("wrshare");if(wr)wr.onclick=()=>weeklyRankCardScreen(rk);
+}
+function weeklyRankCardScreen(rk){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('ranks')">\u2039 Back</button>
+    <h2 style="margin-bottom:4px;">Your weekly rank</h2><div class="sub">Share your progress this week.</div>
+    <div class="center" style="margin-top:16px;"><canvas id="rankcanvas" width="720" height="1280" style="width:220px;height:391px;border-radius:16px;box-shadow:0 6px 24px rgba(0,0,0,.2);"></canvas></div>
+    <button class="btn btn-gold" id="saverank" style="margin-top:18px;"><i class="ti ti-download"></i> Save image</button>
+    <button class="btn" id="sharerank" style="margin-top:10px;border:1px solid #2563eb;color:#2563eb;"><i class="ti ti-share"></i> Save &amp; share</button>
+    <div class="sub" id="rankmsg" style="text-align:center;margin-top:10px;"></div>`;
+  drawRankCard(rk);
+  document.getElementById("saverank").onclick=()=>saveNamedCanvas("rankcanvas","safiya-rank.png",false);
+  document.getElementById("sharerank").onclick=()=>saveNamedCanvas("rankcanvas","safiya-rank.png",true);
+}
+function drawRankCard(rk){
+  const c=document.getElementById("rankcanvas");if(!c)return;const ctx=c.getContext("2d");const W=c.width,H=c.height;
+  const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#38bdf8");g.addColorStop(1,"#2563eb");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#ffffff";ctx.font="800 44px -apple-system,Segoe UI,sans-serif";ctx.textAlign="left";
+  ctx.fillText("SAFIYA",70,110);ctx.fillText("SPEAKING",70,160);
+  ctx.textAlign="center";
+  ctx.fillStyle="rgba(255,255,255,.9)";ctx.font="600 44px -apple-system,Segoe UI,sans-serif";ctx.fillText("This week I ranked",W/2,H/2-160);
+  ctx.fillStyle="#fde047";ctx.font="900 300px -apple-system,Segoe UI,sans-serif";ctx.fillText("#"+rk.rank,W/2,H/2+120);
+  ctx.fillStyle="#ffffff";ctx.font="700 48px -apple-system,Segoe UI,sans-serif";ctx.fillText(rk.minutes+" minutes of English 🎙️",W/2,H/2+230);
+  ctx.fillStyle="rgba(255,255,255,.85)";ctx.font="600 30px -apple-system,Segoe UI,sans-serif";ctx.fillText("t.me/PTC_assistantbot",W/2,H-80);
+}
+async function saveNamedCanvas(canvasId,filename,tryShare){
+  const c=document.getElementById(canvasId);if(!c)return;
+  c.toBlob(async(blob)=>{
+    if(!blob)return;
+    const file=new File([blob],filename,{type:"image/png"});
+    if(tryShare&&navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file],text:"Practicing English on Safiya Speaking 🎙️ t.me/PTC_assistantbot"});return;}catch(e){}
+    }
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const msg=document.getElementById("rankmsg");if(msg)msg.textContent="Saved! Now post it to your story 🎉";
+  },"image/png");
 }
 async function loadBoard(kind,el){
   if(el)document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t===el));
@@ -439,6 +514,7 @@ async function viewProfile(uid){
   if(!p.busy)document.getElementById("rpinvite").onclick=()=>requestCall(p,true);
   const fb=document.getElementById("followbtn2");
   if(p.follow_state==="none"&&fb)fb.onclick=async()=>{const r=await api("/follow",{uid:UID,name:NAME,photo:PHOTO,target_uid:p.uid});fb.disabled=true;fb.innerHTML='<i class="ti ti-clock"></i> Requested';fb.style.border="none";fb.style.color="var(--mut)";};
+  if(p.follow_state==="following"&&fb)fb.onclick=async()=>{if(confirm("Unfollow "+p.name+"?")){await api("/unfollow",{uid:UID,target_uid:p.uid});fb.innerHTML='<i class="ti ti-user-plus"></i> Follow';fb.style.background="";fb.style.border="1px solid var(--navy)";fb.style.color="var(--navy)";fb.onclick=async()=>{await api("/follow",{uid:UID,name:NAME,photo:PHOTO,target_uid:p.uid});fb.disabled=true;fb.innerHTML='<i class="ti ti-clock"></i> Requested';fb.style.border="none";fb.style.color="var(--mut)";};}};
 }
 
 async function followListScreen(uid,which,name){
@@ -599,12 +675,79 @@ async function profileScreen(){
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.minutes||0}</div><div style="font-size:11px;color:var(--mut);">minutes</div></div>
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.total_calls||0}</div><div style="font-size:11px;color:var(--mut);">calls</div></div>
       <div class="card" style="flex:1;padding:12px;text-align:center;"><div style="font-size:22px;font-weight:600;">${p.likes_received||0}</div><div style="font-size:11px;color:var(--mut);">\u2764 likes</div></div></div>
+    <button class="btn" id="sharecard" style="background:linear-gradient(135deg,#38bdf8,#2563eb);color:#fff;border:none;margin-bottom:16px;"><i class="ti ti-share"></i> Share my card</button>
     <div class="card">
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="friendsScreen()"><span><i class="ti ti-users" style="color:var(--gold);"></i> My Friends</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="go('ranks')"><span><i class="ti ti-trophy" style="color:var(--gold);"></i> Leaderboard</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="historyScreen()"><span><i class="ti ti-history" style="color:var(--gold);"></i> Call History</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;display:flex;justify-content:space-between;cursor:pointer;" onclick="settingsScreen()"><span><i class="ti ti-settings" style="color:var(--gold);"></i> Settings</span><span style="color:var(--mut2);">\u203A</span></div>
-    </div>`;
+    </div>
+    ${(p.kudos&&p.kudos.length)?`<div style="margin-top:16px;"><div style="font-size:12px;color:var(--mut2);margin-bottom:8px;">KUDOS FROM PARTNERS</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${p.kudos.map(k=>`<div style="background:var(--goldbg);border-radius:20px;padding:7px 12px;font-size:12px;color:var(--navy);font-weight:600;">${k.emoji} ${escapeHtml(k.label)} <span style="color:var(--gold);">${k.count}</span></div>`).join("")}</div></div>`:''}`;
+  document.getElementById("sharecard").onclick=()=>shareCardScreen(p);
+}
+
+// ─── Share profile card (G5 electric blue) ───
+function shareCardScreen(p){
+  document.getElementById("nav").style.display="none";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('profile')">\u2039 Back</button>
+    <h2 style="margin-bottom:4px;">Share your card</h2><div class="sub">Post it to your story — friends can join with the link on it.</div>
+    <div class="center" style="margin-top:16px;"><canvas id="cardcanvas" width="720" height="1280" style="width:220px;height:391px;border-radius:16px;box-shadow:0 6px 24px rgba(0,0,0,.2);"></canvas></div>
+    <button class="btn btn-gold" id="savecard" style="margin-top:18px;"><i class="ti ti-download"></i> Save image</button>
+    <button class="btn" id="sharecard2" style="margin-top:10px;border:1px solid #2563eb;color:#2563eb;"><i class="ti ti-share"></i> Save &amp; share</button>
+    <div class="sub" id="cardmsg" style="text-align:center;margin-top:10px;"></div>`;
+  drawShareCard(p);
+  document.getElementById("savecard").onclick=()=>saveCardImage(p,false);
+  document.getElementById("sharecard2").onclick=()=>saveCardImage(p,true);
+}
+
+function drawShareCard(p){
+  const c=document.getElementById("cardcanvas");if(!c)return;
+  const ctx=c.getContext("2d");const W=c.width,H=c.height;
+  // blue gradient bg
+  const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#38bdf8");g.addColorStop(1,"#2563eb");
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  // top-left brand
+  ctx.fillStyle="#ffffff";ctx.font="800 44px -apple-system,Segoe UI,sans-serif";ctx.textAlign="left";
+  ctx.fillText("SAFIYA",70,110);ctx.fillText("SPEAKING",70,160);
+  // "I've spoken"
+  ctx.fillStyle="rgba(255,255,255,.9)";ctx.font="600 40px -apple-system,Segoe UI,sans-serif";
+  ctx.fillText("I've spoken",70,H-470);
+  // big number
+  ctx.fillStyle="#fde047";ctx.font="900 220px -apple-system,Segoe UI,sans-serif";
+  ctx.fillText(String(p.minutes||0),64,H-270);
+  // "minutes of English"
+  ctx.fillStyle="#ffffff";ctx.font="800 64px -apple-system,Segoe UI,sans-serif";
+  ctx.fillText("minutes of",70,H-190);ctx.fillText("English 🎙️",70,H-120);
+  // avatar circle (initials)
+  const ax=90,ay=H-70,ar=44;
+  ctx.beginPath();ctx.arc(ax,ay,ar,0,Math.PI*2);ctx.fillStyle="#fde047";ctx.fill();
+  ctx.fillStyle="#2563eb";ctx.font="800 40px -apple-system,Segoe UI,sans-serif";ctx.textAlign="center";
+  ctx.fillText((p.name||NAME||"?").trim().charAt(0).toUpperCase(),ax,ay+14);
+  // name + stats
+  ctx.textAlign="left";ctx.fillStyle="#ffffff";ctx.font="700 34px -apple-system,Segoe UI,sans-serif";
+  ctx.fillText((p.name||NAME||"Learner"),ax+70,ay-6);
+  ctx.fillStyle="rgba(255,255,255,.85)";ctx.font="500 24px -apple-system,Segoe UI,sans-serif";
+  ctx.fillText(`${p.total_calls||0} calls · ${p.likes_received||0} ❤️ · ★${p.avg_rating||"New"}`,ax+70,ay+30);
+  // app link
+  ctx.fillStyle="rgba(255,255,255,.85)";ctx.font="600 24px -apple-system,Segoe UI,sans-serif";ctx.textAlign="right";
+  ctx.fillText("t.me/PTC_assistantbot",W-60,110);
+}
+
+async function saveCardImage(p,tryShare){
+  const c=document.getElementById("cardcanvas");if(!c)return;
+  const msg=document.getElementById("cardmsg");
+  c.toBlob(async(blob)=>{
+    if(!blob){if(msg)msg.textContent="Couldn't create image.";return;}
+    const file=new File([blob],"safiya-card.png",{type:"image/png"});
+    // try native share (reaches IG stories on most phones)
+    if(tryShare&&navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file],text:"I'm practicing English on Safiya Speaking 🎙️ t.me/PTC_assistantbot"});return;}catch(e){}
+    }
+    // fallback: download the image
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="safiya-card.png";document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    if(msg)msg.textContent="Saved! Now post it to your story 🎉";
+  },"image/png");
 }
 
 async function historyScreen(){
@@ -656,6 +799,79 @@ function showUpdateBanner(){
 }
 setInterval(checkVersion,60000);
 checkVersion();
+// save minutes if the app is closed or backgrounded during a call
+window.addEventListener("pagehide",()=>{if(window.__saveBeacon)window.__saveBeacon();});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&window.__saveBeacon)window.__saveBeacon();});
+
+// ═══════════════ SOLO IELTS PRACTICE ═══════════════
+const SOLO_DATA={
+ part1:{title:"Part 1 — Interview",timer:false,questions:["Do you work or are you a student?","What do you like about your job or studies?","Where do you live? Do you like your neighbourhood?","Do you prefer mornings or evenings? Why?","How often do you use your smartphone?","What kind of music do you enjoy?","Do you like cooking? What can you cook?","How do you usually spend your weekends?","Do you enjoy reading books? What kind?","What is your favourite season and why?","Do you like travelling? Where have you been?","How important is exercise to you?","Do you prefer tea or coffee?","What did you want to be when you were a child?","Do you like animals? Do you have a pet?","How do you keep in touch with your friends?","What is your favourite food?","Do you enjoy shopping? Online or in stores?","What kind of weather do you like best?","How do you usually relax after a long day?","Do you like your hometown? Why or why not?","What do you usually do in your free time?","How often do you watch films? What kind?","Do you prefer spending time indoors or outdoors?","What time do you usually wake up?","Do you enjoy learning English? Why?","How do you usually travel around your city?","Do you like taking photographs?","What is your favourite colour and why?","Do you often use social media?","Do you prefer big cities or small towns?","What kind of gifts do you like to receive?","Do you enjoy celebrating birthdays?","How often do you eat out at restaurants?","Do you like listening to the radio or podcasts?","What is your favourite day of the week? Why?","Do you prefer writing by hand or typing?","Do you like plants or flowers in your home?","How do you feel about early mornings?","Do you enjoy playing or watching sports?","What kind of clothes do you usually wear?","Do you like to plan things or be spontaneous?","How often do you meet your relatives?","Do you enjoy trying new foods?","What is something new you learned recently?","Do you prefer to study alone or with others?","How do you usually spend public holidays?","Do you like rainy days? Why or why not?","What makes you feel happy on an ordinary day?","Do you prefer phone calls or text messages?"]},
+ part2:{title:"Part 2 — Cue Card",timer:true,questions:[{q:"Describe a person who has influenced you.",f:["Who this person is","How you know them","What they did","Why they influenced you"]},{q:"Describe a place you like to visit.",f:["Where it is","How often you go","What you do there","Why you like it"]},{q:"Describe a memorable journey you took.",f:["Where you went","Who you were with","What happened","Why it was memorable"]},{q:"Describe a skill you would like to learn.",f:["What the skill is","Why you want to learn it","How you would learn it","How it would help you"]},{q:"Describe a book that you enjoyed reading.",f:["What the book is","What it is about","When you read it","Why you enjoyed it"]},{q:"Describe a gift you gave to someone.",f:["What the gift was","Who you gave it to","Why you chose it","How they reacted"]},{q:"Describe a time you helped someone.",f:["Who you helped","What the situation was","What you did","How you felt afterwards"]},{q:"Describe your favourite piece of technology.",f:["What it is","How you use it","How often you use it","Why it is important to you"]},{q:"Describe a festival celebrated in your country.",f:["What the festival is","When it happens","What people do","Why you enjoy it"]},{q:"Describe a goal you want to achieve.",f:["What the goal is","Why you want it","What you are doing to reach it","How you will feel when you achieve it"]},{q:"Describe a restaurant you like.",f:["Where it is","What food it serves","Who you go with","Why you like it"]},{q:"Describe a hobby you have.",f:["What the hobby is","When you started it","How often you do it","Why you enjoy it"]},{q:"Describe a time you learned something new.",f:["What you learned","How you learned it","Who helped you","How you felt"]},{q:"Describe a place you would like to visit in the future.",f:["Where it is","How you know about it","What you would do there","Why you want to go"]},{q:"Describe a decision that changed your life.",f:["What the decision was","When you made it","Why you made it","How it changed things"]},{q:"Describe a photograph you like.",f:["What is in it","When it was taken","Who took it","Why you like it"]},{q:"Describe an important event in your life.",f:["What the event was","When it happened","Who was there","Why it was important"]},{q:"Describe a piece of advice someone gave you.",f:["Who gave it","What the advice was","When they gave it","How it helped you"]},{q:"Describe a difficult challenge you overcame.",f:["What the challenge was","Why it was difficult","What you did","How you felt afterwards"]},{q:"Describe a person you admire.",f:["Who the person is","How you know them","What they are like","Why you admire them"]},{q:"Describe a place where you like to relax.",f:["Where it is","When you go there","What you do there","Why it relaxes you"]},{q:"Describe a time you felt very proud.",f:["What happened","When it was","Who was with you","Why you felt proud"]},{q:"Describe a piece of music you enjoy.",f:["What it is","When you listen to it","How it makes you feel","Why you like it"]},{q:"Describe a subject you enjoyed studying.",f:["What the subject was","When you studied it","What you learned","Why you enjoyed it"]},{q:"Describe a family member you are close to.",f:["Who they are","What they are like","What you do together","Why you are close"]},{q:"Describe a time you tried something for the first time.",f:["What it was","Why you tried it","What happened","How you felt"]},{q:"Describe a website or app you often use.",f:["What it is","How you use it","How often you use it","Why it is useful"]},{q:"Describe a memorable meal you had.",f:["What the meal was","Where you had it","Who you were with","Why it was memorable"]},{q:"Describe a small business you would like to start.",f:["What it would be","Why you chose it","Who your customers would be","How you would run it"]},{q:"Describe a time you were very busy.",f:["When it was","What you had to do","How you managed","How you felt afterwards"]},{q:"Describe a natural place you have visited.",f:["Where it is","When you went","What you did there","Why you liked it"]},{q:"Describe an object that is important to you.",f:["What it is","Where you got it","How you use it","Why it matters to you"]},{q:"Describe a time you helped a stranger.",f:["What the situation was","What you did","How they reacted","How you felt"]},{q:"Describe a teacher who influenced you.",f:["Who they were","What subject they taught","What they were like","How they influenced you"]},{q:"Describe a tradition in your family.",f:["What the tradition is","When you do it","Who takes part","Why it is important"]},{q:"Describe a time you had to be brave.",f:["What happened","Why you had to be brave","What you did","How you felt afterwards"]},{q:"Describe a change you would like to make in your life.",f:["What the change is","Why you want it","How you would make it","How it would help you"]},{q:"Describe a city you have visited.",f:["Which city it was","When you went","What you did there","What you thought of it"]},{q:"Describe a game or sport you enjoy.",f:["What it is","How you play it","Who you play with","Why you enjoy it"]},{q:"Describe a time you waited for something.",f:["What you waited for","How long you waited","How you felt","What happened in the end"]},{q:"Describe a piece of good news you received.",f:["What the news was","Who told you","How you reacted","Why it was important"]},{q:"Describe a place in your home you like.",f:["Which place it is","What it looks like","What you do there","Why you like it"]},{q:"Describe a person who makes you laugh.",f:["Who they are","How you know them","What they do","Why they make you laugh"]},{q:"Describe a time you worked in a team.",f:["What the task was","Who was in the team","What your role was","How it went"]},{q:"Describe a habit you would like to change.",f:["What the habit is","Why you have it","Why you want to change it","How you might do so"]},{q:"Describe an interesting person you met.",f:["Who they were","Where you met them","What you talked about","Why they were interesting"]},{q:"Describe a public place you like.",f:["Where it is","How often you go","What you do there","Why you like it"]},{q:"Describe a time you made a promise.",f:["What you promised","Who you promised","Why you made it","Whether you kept it"]}]},
+ part3:{title:"Part 3 — Discussion",timer:false,questions:["Do you think technology has made people less social? Why?","How has education changed in the last twenty years?","Should governments spend more money on public transport?","Why do some people prefer living in big cities?","How important is it for children to learn a second language?","Do you think people work too much these days?","What are the advantages and disadvantages of social media?","How can societies encourage people to protect the environment?","Do you think traditional skills are being lost? Why?","Is it better to be a specialist or a generalist in your career?","How does advertising influence people's choices?","Should famous people have a right to privacy?","Why do people enjoy competitive sports?","How might work change in the next fifty years?","Do you think money brings happiness? Why or why not?","What role should the government play in people's health?","Do you think people rely too much on technology today?","How can parents encourage children to read more?","Should university education be free for everyone?","Do you think globalisation is good for local cultures?","Why do some people prefer working from home?","How has the way people communicate changed over time?","Should companies be responsible for protecting the environment?","Do you think young people respect old traditions?","What are the benefits of learning about other cultures?","How can cities be made more comfortable to live in?","Do you think creativity can be taught? Why?","Should people retire at a fixed age?","How important is it to have hobbies outside of work?","Do you think advertising influences children too much?","Why do people move from the countryside to cities?","Should governments limit the use of cars in city centres?","How can societies support elderly people better?","Do you think success is mostly about luck or effort?","What are the advantages of learning a foreign language?","How has tourism affected local communities?","Do you think people are more stressed than in the past?","Should schools focus more on practical skills?","Why do some people enjoy taking risks?","How can we encourage people to eat more healthily?","Do you think the internet has made people more informed?","Should famous people be role models for young people?","How important is teamwork in the modern workplace?","Do you think competition is good for children?","How can we reduce waste in everyday life?","Should people be encouraged to change jobs often?","Do you think books will be replaced by digital media?","Why do some traditions disappear over time?","How can governments encourage people to use public transport?","Do you think people value their free time enough these days?"]},
+ random:{title:"Random — Speaking Topics",timer:true,questions:["Ambition","Regret","Loneliness","Fame","Trust","Failure","Freedom","Success","Jealousy","Nostalgia","Power","Sacrifice","Loyalty","Boredom","Fear","Change","Privacy","Fairness","Curiosity","Pride","Patience","Revenge","Ego","Guilt","Tradition","Risk","Wisdom","Beauty","Money","Time","Silence","Perfection","Luck","Empathy","Addiction","Ambiguity","Discipline","Vulnerability","Reputation","Legacy","Prejudice","Comfort","Instinct","Obsession","Maturity","Karma","Chaos","Identity","Temptation","Resilience"]}
+};
+let soloSection=null,soloTimerId=null,soloSecs=120,soloShuffling=false,soloLast=-1,soloAC=null;
+function soloHome(){
+  clearTimers();document.getElementById("nav").style.display="flex";currentTab="speak";
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('speak')">\u2039 Back</button>
+    <h2>Solo Practice 🎯</h2><div class="sub">Spin a question and answer out loud. No partner needed.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px;">
+      <div class="card" style="padding:18px 14px;cursor:pointer;" onclick="soloStart('part1')"><div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.05em;">SECTION ONE</div><div style="font-size:18px;font-weight:700;color:var(--navy);margin:4px 0;">Part 1</div><div style="font-size:11px;color:var(--mut);">Interview — short personal questions</div></div>
+      <div class="card" style="padding:18px 14px;cursor:pointer;" onclick="soloStart('part2')"><div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.05em;">SECTION TWO</div><div style="font-size:18px;font-weight:700;color:var(--navy);margin:4px 0;">Part 2</div><div style="font-size:11px;color:var(--mut);">Cue card — speak 2 min, with timer</div></div>
+      <div class="card" style="padding:18px 14px;cursor:pointer;" onclick="soloStart('part3')"><div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.05em;">SECTION THREE</div><div style="font-size:18px;font-weight:700;color:var(--navy);margin:4px 0;">Part 3</div><div style="font-size:11px;color:var(--mut);">Discussion — opinion questions</div></div>
+      <div class="card" style="padding:18px 14px;cursor:pointer;background:var(--navy);" onclick="soloStart('random')"><div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.05em;">MIXED</div><div style="font-size:18px;font-weight:700;color:#fff;margin:4px 0;">Random</div><div style="font-size:11px;color:#b0bdd0;">One topic word — challenge yourself</div></div>
+    </div>`;
+}
+function soloStart(key){
+  soloSection=key;document.getElementById("nav").style.display="none";
+  const t=SOLO_DATA[key].title;
+  scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="soloStop();soloHome()">\u2039 Sections</button>
+    <h2 style="margin-bottom:2px;">${t}</h2><div class="sub" id="soloCounter"></div>
+    <div class="card" id="soloBox" style="margin-top:16px;padding:24px 18px;min-height:150px;display:flex;flex-direction:column;justify-content:center;transition:transform .1s;">
+      <div id="soloQ" style="font-size:19px;line-height:1.4;color:var(--navy);text-align:center;"><span style="color:var(--mut);">Tap “New question” to begin.</span></div>
+      <ul id="soloF" style="list-style:none;padding:0;margin:12px 0 0;font-size:14px;color:var(--mut);line-height:1.8;"></ul>
+    </div>
+    <button class="btn btn-gold" id="soloNew" style="margin-top:16px;padding:15px;"><i class="ti ti-refresh"></i> New question</button>
+    <div id="soloTimerWrap" style="text-align:center;margin-top:14px;"></div>`;
+  document.getElementById("soloNew").onclick=soloNewQuestion;
+  soloStop();
+}
+function soloAc(){if(!soloAC)soloAC=new (window.AudioContext||window.webkitAudioContext)();return soloAC;}
+function soloClick(pitch){try{const ctx=soloAc();const t=ctx.currentTime;const dur=0.045;const buf=ctx.createBuffer(1,Math.ceil(ctx.sampleRate*dur),ctx.sampleRate);const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,3);const src=ctx.createBufferSource();src.buffer=buf;const bp=ctx.createBiquadFilter();bp.type="bandpass";bp.frequency.value=pitch||1800;bp.Q.value=6;const gain=ctx.createGain();gain.gain.setValueAtTime(0.5,t);gain.gain.exponentialRampToValueAtTime(0.0001,t+dur);src.connect(bp).connect(gain).connect(ctx.destination);src.start(t);src.stop(t+dur);}catch(e){}}
+function soloDing(){try{const ctx=soloAc();const t=ctx.currentTime;[880,1320].forEach((f,k)=>{const osc=ctx.createOscillator();const gain=ctx.createGain();osc.type="triangle";osc.frequency.setValueAtTime(f,t+k*0.06);gain.gain.setValueAtTime(0.0001,t+k*0.06);gain.gain.exponentialRampToValueAtTime(0.22,t+k*0.06+0.01);gain.gain.exponentialRampToValueAtTime(0.0001,t+k*0.06+0.4);osc.connect(gain).connect(ctx.destination);osc.start(t+k*0.06);osc.stop(t+k*0.06+0.45);});}catch(e){}}
+function soloShow(item){
+  const qEl=document.getElementById("soloQ"),fEl=document.getElementById("soloF");if(!qEl)return;fEl.innerHTML="";
+  if(typeof item==="object"){qEl.textContent=item.q;qEl.style.fontSize="19px";qEl.style.fontWeight="600";
+    if(item.f){const intro=document.createElement("li");intro.style.cssText="font-weight:700;color:var(--navy);margin-bottom:4px;";intro.textContent="You should say:";fEl.appendChild(intro);item.f.forEach(f=>{const li=document.createElement("li");li.textContent="• "+f;fEl.appendChild(li);});}
+  }else{qEl.textContent=item;qEl.style.fontSize=(soloSection==="random")?"34px":"19px";qEl.style.fontWeight=(soloSection==="random")?"800":"400";}
+}
+function soloNewQuestion(){
+  if(soloShuffling)return;const pool=SOLO_DATA[soloSection].questions;
+  document.getElementById("soloCounter").textContent="Shuffling…";
+  document.getElementById("soloTimerWrap").innerHTML="";soloStop();
+  const btn=document.getElementById("soloNew");btn.disabled=true;soloShuffling=true;
+  let finalIdx;do{finalIdx=Math.floor(Math.random()*pool.length);}while(pool.length>1&&finalIdx===soloLast&&soloSection!=="random");soloLast=finalIdx;
+  let step=0;const flickers=9;
+  function tick(){
+    if(step<flickers){soloShow(pool[Math.floor(Math.random()*pool.length)]);soloClick(1700+Math.random()*300);step++;setTimeout(tick,70+step*step*3.2);}
+    else{soloShow(pool[finalIdx]);soloDing();const box=document.getElementById("soloBox");if(box){box.style.transform="scale(1.03)";setTimeout(()=>box.style.transform="scale(1)",200);}soloFinish();btn.disabled=false;soloShuffling=false;}
+  }
+  tick();
+}
+function soloFinish(){
+  const pool=SOLO_DATA[soloSection].questions;
+  document.getElementById("soloCounter").textContent=(soloSection==="random")?`${pool.length} speaking topics`:`${pool.length} questions in this section`;
+  const needsTimer=SOLO_DATA[soloSection].timer;
+  const wrap=document.getElementById("soloTimerWrap");
+  if(needsTimer){wrap.innerHTML=`<button class="btn" id="soloTimerBtn" style="width:auto;padding:9px 18px;font-size:13px;">⏱ Start 2-min timer</button>`;document.getElementById("soloTimerBtn").onclick=soloStartTimer;}
+}
+function soloStartTimer(){
+  soloSecs=120;const wrap=document.getElementById("soloTimerWrap");
+  wrap.innerHTML=`<div id="soloTimer" style="font-size:34px;font-weight:800;color:var(--navy);">2:00</div>`;
+  soloStop();
+  soloTimerId=setInterval(()=>{soloSecs--;const el=document.getElementById("soloTimer");if(!el){soloStop();return;}const m=Math.floor(soloSecs/60),s=soloSecs%60;el.textContent=m+":"+(s<10?"0":"")+s;el.style.color=soloSecs<=30?"var(--red)":"var(--navy)";if(soloSecs<=0){soloStop();el.textContent="Time!";}},1000);
+}
+function soloStop(){if(soloTimerId){clearInterval(soloTimerId);soloTimerId=null;}}
 
 go("speak");
 </script>

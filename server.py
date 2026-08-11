@@ -16,7 +16,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
-APP_VERSION    = "16"  # bump on each deploy so clients auto-update
+APP_VERSION    = "18"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -161,6 +161,10 @@ def init_db():
     _run("""CREATE TABLE IF NOT EXISTS sp_reviews (
         id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, stars INTEGER, text TEXT,
         status TEXT DEFAULT 'pending', ts DOUBLE PRECISION, created TEXT)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_kudos (
+        id SERIAL PRIMARY KEY, uid TEXT, from_uid TEXT, tag TEXT, ts DOUBLE PRECISION)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_pair_time (
+        a TEXT, b TEXT, seconds INTEGER DEFAULT 0, week TEXT, PRIMARY KEY (a,b,week))""")
     print("init_db complete")
 
 def upsert_user(uid, name, photo_url, level=None):
@@ -211,6 +215,53 @@ def get_profile(uid):
             cur.execute("SELECT * FROM sp_users WHERE uid=%s",(str(uid),))
             row = cur.fetchone()
             return _profile_row(row) if row else None
+
+def record_seconds_delta(uid, new_total_seconds):
+    """Save only the NEWLY elapsed seconds since last save for this user's active call.
+    Updates total_seconds live so minutes are never lost even if the call never ends cleanly."""
+    if not DATABASE_URL: return
+    with lock:
+        m = matches.get(uid)
+        if not m: return
+        already = m.get("recorded_seconds", 0)
+        delta = int(new_total_seconds) - already
+        if delta <= 0: return
+        m["recorded_seconds"] = int(new_total_seconds)
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE sp_users SET total_seconds=total_seconds+%s WHERE uid=%s",(delta,str(uid)))
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); print("record_seconds_delta ERROR:",str(e)[:150])
+    finally:
+        conn.close()
+
+def finalize_call_log(uid, partner_uid, partner_name, level):
+    """Write ONE call-history row per user at call end (minutes already counted live).
+    Records a call row + increments total_calls. Safe to call once per user per call."""
+    if not DATABASE_URL: return
+    with lock:
+        m = matches.get(uid) or {}
+        secs = m.get("recorded_seconds", 0)
+        if m.get("logged"): return
+        if uid in matches: matches[uid]["logged"] = True
+    if secs < 3: return
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO sp_calls (uid,partner_uid,partner_name,seconds,level,ended_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                        (str(uid),str(partner_uid),partner_name,secs,level,time.strftime("%Y-%m-%d %H:%M")))
+            cur.execute("UPDATE sp_users SET total_calls=total_calls+1 WHERE uid=%s",(str(uid),))
+        conn.commit()
+        print(f"finalize_call_log OK: uid={uid} seconds={secs}")
+        # record pair-time for Duo of the Week — only from one side to avoid double-count
+        if partner_uid and str(uid) < str(partner_uid):
+            add_pair_time(uid, partner_uid, secs)
+    except Exception as e:
+        conn.rollback(); print("finalize_call_log ERROR:",str(e)[:150])
+    finally:
+        conn.close()
 
 def record_call(uid, partner_uid, partner_name, seconds, level):
     if not DATABASE_URL or seconds < 3:
@@ -402,6 +453,90 @@ def last_seen_text(ts):
     return time.strftime("%b %d", time.localtime(ts))
 
 
+# ─── Kudos tags ──────────────────────────────────────────────────────────────
+KUDOS_TAGS = [
+    {"id":"pronunciation","label":"Great pronunciation","emoji":"👏"},
+    {"id":"confident","label":"Confident","emoji":"💪"},
+    {"id":"kind","label":"Kind partner","emoji":"😊"},
+    {"id":"listener","label":"Good listener","emoji":"👂"},
+    {"id":"fun","label":"Fun to talk to","emoji":"🎉"},
+    {"id":"smart","label":"Smart ideas","emoji":"🧠"},
+]
+KUDOS_BY_ID = {k["id"]:k for k in KUDOS_TAGS}
+
+def add_kudos(target_uid, from_uid, tag):
+    if not DATABASE_URL or str(target_uid)==str(from_uid): return
+    if tag not in KUDOS_BY_ID: return
+    _run("INSERT INTO sp_kudos (uid,from_uid,tag,ts) VALUES (%s,%s,%s,%s)",
+         (str(target_uid),str(from_uid),tag,time.time()))
+
+def get_kudos_counts(uid):
+    if not DATABASE_URL: return []
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT tag, COUNT(*) FROM sp_kudos WHERE uid=%s GROUP BY tag",(str(uid),))
+            counts={row[0]:row[1] for row in cur.fetchall()}
+        out=[]
+        for k in KUDOS_TAGS:
+            c=counts.get(k["id"],0)
+            if c>0: out.append({"label":k["label"],"emoji":k["emoji"],"count":c})
+        out.sort(key=lambda x:-x["count"])
+        return out
+    except: return []
+    finally: conn.close()
+
+# ─── Weekly pair-time (Duo of the Week) ──────────────────────────────────────
+def _week_key(ts=None):
+    return time.strftime("%Y-W%U", time.localtime(ts or time.time()))
+
+def add_pair_time(uid1, uid2, seconds):
+    if not DATABASE_URL or seconds<=0: return
+    a,b=sorted([str(uid1),str(uid2)])
+    wk=_week_key()
+    _run("""INSERT INTO sp_pair_time (a,b,seconds,week) VALUES (%s,%s,%s,%s)
+            ON CONFLICT (a,b,week) DO UPDATE SET seconds=sp_pair_time.seconds+%s""",
+         (a,b,int(seconds),wk,int(seconds)))
+
+def get_duo_of_week():
+    if not DATABASE_URL: return None
+    wk=_week_key()
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""SELECT p.a,p.b,p.seconds, ua.name AS a_name, ua.photo_url AS a_photo,
+                           ub.name AS b_name, ub.photo_url AS b_photo
+                    FROM sp_pair_time p
+                    JOIN sp_users ua ON ua.uid=p.a JOIN sp_users ub ON ub.uid=p.b
+                    WHERE p.week=%s ORDER BY p.seconds DESC LIMIT 1""",(wk,))
+            r=cur.fetchone()
+            if not r: return None
+            r=dict(r); r["minutes"]=round((r.get("seconds") or 0)/60)
+            return r
+    except Exception as e:
+        print("duo error:",str(e)[:120]); return None
+    finally: conn.close()
+
+# ─── Weekly rank (from this week's minutes) ──────────────────────────────────
+def get_weekly_rank(uid):
+    """Rank users by minutes talked THIS week (from sp_calls in last 7 days)."""
+    if not DATABASE_URL: return None
+    conn=get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""SELECT uid, SUM(seconds) AS secs FROM sp_calls
+                    WHERE ended_at >= %s GROUP BY uid ORDER BY secs DESC""",
+                    (time.strftime("%Y-%m-%d", time.localtime(time.time()-7*86400)),))
+            rows=cur.fetchall()
+        for i,row in enumerate(rows):
+            if str(row["uid"])==str(uid):
+                return {"rank":i+1, "minutes":round((row["secs"] or 0)/60), "total":len(rows)}
+        return None
+    except Exception as e:
+        print("weekly_rank error:",str(e)[:120]); return None
+    finally: conn.close()
+
+
 # ─── Follows + Community messages ────────────────────────────────────────────
 def follow_user(follower, following):
     if not DATABASE_URL or follower==following: return
@@ -561,16 +696,29 @@ def token():
 @app.route("/status", methods=["POST"])
 def status():
     d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    secs=d.get("seconds")
+    with lock:
+        if uid in matches: matches[uid]["last_hb"]=time.time()
+    # Save minutes LIVE during the call (heartbeat) so nothing is lost if the app closes/drops
+    if secs is not None:
+        try: record_seconds_delta(uid, int(secs))
+        except: pass
     with lock:
         return jsonify(active=(uid in matches))
 
 
 def _finish(uid, seconds):
-    """Pop match, record BOTH sides' minutes once, free partner. Returns partner info."""
-    m = matches.pop(uid, None)
+    """Record THIS user's own call independently, then pop only this user.
+    Does NOT touch the partner's match — the partner records their own side."""
+    with lock:
+        m = matches.get(uid)
     if not m: return None
-    partner = m["partner_uid"]; matches.pop(partner, None); _remember(uid, partner)
-    record_call(uid, partner, m["partner_name"], seconds, m.get("partner_level",""))
+    # save any remaining unsaved seconds, then write the history row for THIS user
+    record_seconds_delta(uid, int(seconds or 0))
+    finalize_call_log(uid, m["partner_uid"], m.get("partner_name",""), m.get("partner_level",""))
+    with lock:
+        matches.pop(uid, None)
+        _remember(uid, m["partner_uid"])
     return m
 
 
@@ -635,6 +783,7 @@ def profile():
     p["history"]=get_call_history(uid)
     p["followers"]=follower_count(uid)
     p["following"]=following_count(uid)
+    p["kudos"]=get_kudos_counts(uid)
     return jsonify(profile=p)
 
 
@@ -656,6 +805,7 @@ def pubprofile():
                             "bio":p.get("bio",""),"minutes":p["minutes"],"total_calls":p.get("total_calls",0),
                             "likes_received":p.get("likes_received",0),"avg_rating":p.get("avg_rating"),
                             "followers":follower_count(uid),"following":following_count(uid),
+                            "kudos":get_kudos_counts(uid),
                             "last_seen":last_seen_text(p.get("last_seen",0)),
                             "online":online,"busy":busy,"follow_state":fstate})
 
@@ -820,6 +970,36 @@ def ep_review_submit():
 def ep_reviews():
     return jsonify(reviews=get_approved_reviews())
 
+# ─── Kudos endpoints ─────────────────────────────────────────────────────────
+@app.route("/kudos_tags", methods=["POST"])
+def ep_kudos_tags():
+    return jsonify(tags=KUDOS_TAGS)
+
+@app.route("/kudos_send", methods=["POST"])
+def ep_kudos_send():
+    d=request.get_json(force=True)
+    frm=str(d.get("uid","")).strip(); target=str(d.get("target_uid","")).strip()
+    tags=d.get("tags") or []
+    if not frm or not target: return jsonify(ok=False)
+    for tag in tags:
+        add_kudos(target, frm, tag)
+    return jsonify(ok=True)
+
+@app.route("/kudos_get", methods=["POST"])
+def ep_kudos_get():
+    d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    return jsonify(kudos=get_kudos_counts(uid))
+
+# ─── Duo of the Week + Weekly rank ───────────────────────────────────────────
+@app.route("/duo_of_week", methods=["POST"])
+def ep_duo_of_week():
+    return jsonify(duo=get_duo_of_week())
+
+@app.route("/weekly_rank", methods=["POST"])
+def ep_weekly_rank():
+    d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
+    return jsonify(rank=get_weekly_rank(uid))
+
 @app.route("/reviews_pending", methods=["POST"])
 def ep_reviews_pending():
     """Admin-only: list reviews awaiting approval."""
@@ -934,12 +1114,22 @@ def ep_roleplay_invite():
 def _reaper():
     while True:
         time.sleep(30); now=time.time()
+        to_finalize=[]
         with lock:
             for uid in list(matches.keys()):
-                if now-matches[uid]["ts"]>MATCH_TTL: matches.pop(uid,None)
+                m=matches[uid]
+                last_hb=m.get("last_hb", m.get("ts", now))
+                # call is dead if TTL exceeded OR no heartbeat for 90s (app closed/dropped)
+                if now-m["ts"]>MATCH_TTL or now-last_hb>90:
+                    to_finalize.append((uid, m.get("partner_uid",""), m.get("partner_name",""), m.get("partner_level","")))
             for t in list(requests_in.keys()):
                 if now-requests_in[t]["ts"]>REQ_TTL: requests_in.pop(t,None)
             globals()["waiting"]=[w for w in waiting if now-w["ts"]<300]
+        # finalize outside the lock (finalize_call_log takes the lock itself)
+        for uid,puid,pname,plvl in to_finalize:
+            finalize_call_log(uid,puid,pname,plvl)
+            with lock:
+                matches.pop(uid,None)
 
 
 @app.route("/")
