@@ -682,55 +682,148 @@ async function profileScreen(){
       <div style="padding:13px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;cursor:pointer;" onclick="historyScreen()"><span><i class="ti ti-history" style="color:var(--gold);"></i> Call History</span><span style="color:var(--mut2);">\u203A</span></div>
       <div style="padding:13px 14px;display:flex;justify-content:space-between;cursor:pointer;" onclick="settingsScreen()"><span><i class="ti ti-settings" style="color:var(--gold);"></i> Settings</span><span style="color:var(--mut2);">\u203A</span></div>
     </div>
-    ${(p.kudos&&p.kudos.length)?`<div style="margin-top:16px;"><div style="font-size:12px;color:var(--mut2);margin-bottom:8px;">KUDOS FROM PARTNERS</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${p.kudos.map(k=>`<div style="background:var(--goldbg);border-radius:20px;padding:7px 12px;font-size:12px;color:var(--navy);font-weight:600;">${k.emoji} ${escapeHtml(k.label)} <span style="color:var(--gold);">${k.count}</span></div>`).join("")}</div></div>`:''}`;
+    ${(p.kudos&&p.kudos.length)?`<div style="margin-top:18px;"><div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px;display:flex;align-items:center;gap:6px;"><i class="ti ti-award" style="color:var(--gold);font-size:18px;"></i> Kudos from partners</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">${p.kudos.map(k=>`<div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #bfdbfe;border-radius:16px;padding:12px;display:flex;align-items:center;gap:10px;position:relative;"><div style="font-size:26px;">${k.emoji}</div><div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#1e40af;line-height:1.2;">${escapeHtml(k.label)}</div></div><div style="background:#2563eb;color:#fff;font-size:12px;font-weight:700;border-radius:12px;min-width:24px;height:22px;display:flex;align-items:center;justify-content:center;padding:0 7px;">${k.count}</div></div>`).join("")}</div></div>`:''}`;
   document.getElementById("sharecard").onclick=()=>shareCardScreen(p);
 }
 
 // ─── Share profile card (G5 electric blue) ───
+const CARD_STYLES=["aurora","pastel","neon","luxe","playful","diagonal","wave"];
+const CARD_NAMES={aurora:"Aurora Glass",pastel:"Soft Pastel",neon:"Neon Night",luxe:"Minimal Luxe",playful:"Playful Pop",diagonal:"Diagonal Split",wave:"Wave"};
+let cardIdx=0;
 function shareCardScreen(p){
   document.getElementById("nav").style.display="none";
+  // start on last-chosen style
+  const saved=localStorage.getItem("sp_cardstyle");
+  cardIdx=Math.max(0,CARD_STYLES.indexOf(saved)); if(cardIdx<0)cardIdx=0;
   scr.innerHTML=`<button class="btn" style="width:auto;padding:7px 14px;font-size:13px;border:none;color:var(--mut);margin-bottom:10px;" onclick="go('profile')">\u2039 Back</button>
-    <h2 style="margin-bottom:4px;">Share your card</h2><div class="sub">Post it to your story — friends can join with the link on it.</div>
-    <div class="center" style="margin-top:16px;"><canvas id="cardcanvas" width="720" height="1280" style="width:220px;height:391px;border-radius:16px;box-shadow:0 6px 24px rgba(0,0,0,.2);"></canvas></div>
-    <button class="btn btn-gold" id="savecard" style="margin-top:18px;"><i class="ti ti-download"></i> Save image</button>
+    <h2 style="margin-bottom:2px;">Choose your card</h2><div class="sub">Swipe to pick a style, then save or share it.</div>
+    <div class="center" style="margin-top:14px;position:relative;">
+      <div id="cardprev" style="position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:2;width:34px;height:34px;border-radius:50%;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="ti ti-chevron-left" style="font-size:20px;color:var(--navy);"></i></div>
+      <canvas id="cardcanvas" width="720" height="1280" style="width:230px;height:409px;border-radius:18px;box-shadow:0 8px 28px rgba(0,0,0,.22);"></canvas>
+      <div id="cardnext" style="position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:2;width:34px;height:34px;border-radius:50%;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;cursor:pointer;"><i class="ti ti-chevron-right" style="font-size:20px;color:var(--navy);"></i></div>
+    </div>
+    <div id="cardstylename" style="text-align:center;font-size:13px;font-weight:600;color:var(--navy);margin-top:10px;"></div>
+    <div id="carddots" style="display:flex;gap:6px;justify-content:center;margin-top:8px;"></div>
+    <button class="btn btn-gold" id="savecard" style="margin-top:16px;"><i class="ti ti-download"></i> Save image</button>
     <button class="btn" id="sharecard2" style="margin-top:10px;border:1px solid #2563eb;color:#2563eb;"><i class="ti ti-share"></i> Save &amp; share</button>
     <div class="sub" id="cardmsg" style="text-align:center;margin-top:10px;"></div>`;
-  drawShareCard(p);
+  renderCard(p);
+  document.getElementById("cardprev").onclick=()=>{cardIdx=(cardIdx-1+CARD_STYLES.length)%CARD_STYLES.length;renderCard(p);};
+  document.getElementById("cardnext").onclick=()=>{cardIdx=(cardIdx+1)%CARD_STYLES.length;renderCard(p);};
+  // swipe support
+  const cv=document.getElementById("cardcanvas");let sx=0;
+  cv.addEventListener("touchstart",e=>{sx=e.touches[0].clientX;},{passive:true});
+  cv.addEventListener("touchend",e=>{const dx=e.changedTouches[0].clientX-sx;if(dx>40){cardIdx=(cardIdx-1+CARD_STYLES.length)%CARD_STYLES.length;renderCard(p);}else if(dx<-40){cardIdx=(cardIdx+1)%CARD_STYLES.length;renderCard(p);}});
   document.getElementById("savecard").onclick=()=>saveCardImage(p,false);
   document.getElementById("sharecard2").onclick=()=>saveCardImage(p,true);
 }
+function renderCard(p){
+  const style=CARD_STYLES[cardIdx];
+  localStorage.setItem("sp_cardstyle",style);
+  drawShareCard(p,style);
+  const nm=document.getElementById("cardstylename");if(nm)nm.textContent=CARD_NAMES[style];
+  const dots=document.getElementById("carddots");
+  if(dots)dots.innerHTML=CARD_STYLES.map((s,i)=>`<div style="width:${i===cardIdx?18:7}px;height:7px;border-radius:4px;background:${i===cardIdx?'#2563eb':'#cbd5e1'};transition:all .2s;"></div>`).join("");
+}
 
-function drawShareCard(p){
+function drawShareCard(p,style){
   const c=document.getElementById("cardcanvas");if(!c)return;
   const ctx=c.getContext("2d");const W=c.width,H=c.height;
-  // blue gradient bg
-  const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#38bdf8");g.addColorStop(1,"#2563eb");
-  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-  // top-left brand
-  ctx.fillStyle="#ffffff";ctx.font="800 44px -apple-system,Segoe UI,sans-serif";ctx.textAlign="left";
-  ctx.fillText("SAFIYA",70,110);ctx.fillText("SPEAKING",70,160);
-  // "I've spoken"
-  ctx.fillStyle="rgba(255,255,255,.9)";ctx.font="600 40px -apple-system,Segoe UI,sans-serif";
-  ctx.fillText("I've spoken",70,H-470);
-  // big number
-  ctx.fillStyle="#fde047";ctx.font="900 220px -apple-system,Segoe UI,sans-serif";
-  ctx.fillText(String(p.minutes||0),64,H-270);
-  // "minutes of English"
-  ctx.fillStyle="#ffffff";ctx.font="800 64px -apple-system,Segoe UI,sans-serif";
-  ctx.fillText("minutes of",70,H-190);ctx.fillText("English 🎙️",70,H-120);
-  // avatar circle (initials)
-  const ax=90,ay=H-70,ar=44;
-  ctx.beginPath();ctx.arc(ax,ay,ar,0,Math.PI*2);ctx.fillStyle="#fde047";ctx.fill();
-  ctx.fillStyle="#2563eb";ctx.font="800 40px -apple-system,Segoe UI,sans-serif";ctx.textAlign="center";
-  ctx.fillText((p.name||NAME||"?").trim().charAt(0).toUpperCase(),ax,ay+14);
-  // name + stats
-  ctx.textAlign="left";ctx.fillStyle="#ffffff";ctx.font="700 34px -apple-system,Segoe UI,sans-serif";
-  ctx.fillText((p.name||NAME||"Learner"),ax+70,ay-6);
-  ctx.fillStyle="rgba(255,255,255,.85)";ctx.font="500 24px -apple-system,Segoe UI,sans-serif";
-  ctx.fillText(`${p.total_calls||0} calls · ${p.likes_received||0} ❤️ · ★${p.avg_rating||"New"}`,ax+70,ay+30);
-  // app link
-  ctx.fillStyle="rgba(255,255,255,.85)";ctx.font="600 24px -apple-system,Segoe UI,sans-serif";ctx.textAlign="right";
-  ctx.fillText("t.me/PTC_assistantbot",W-60,110);
+  const mins=String(p.minutes||0);
+  const initial=(p.name||NAME||"?").trim().charAt(0).toUpperCase();
+  const name=(p.name||NAME||"Learner");
+  const stats=`${p.total_calls||0} calls  ·  ${p.likes_received||0} ❤  ·  ★${p.avg_rating||"New"}`;
+  const S="-apple-system,Segoe UI,Roboto,sans-serif";
+  ctx.clearRect(0,0,W,H);
+  function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+  function circle(x,y,r){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.closePath();}
+  function avatarCircle(x,y,r,bg,fg){ctx.fillStyle=bg;circle(x,y,r);ctx.fill();ctx.fillStyle=fg;ctx.font=`800 ${r*0.9}px ${S}`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(initial,x,y+2);ctx.textBaseline="alphabetic";}
+
+  if(style==="aurora"){
+    const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#1e3a8a");g.addColorStop(.5,"#2563eb");g.addColorStop(1,"#38bdf8");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    let rg=ctx.createRadialGradient(W-90,140,10,W-90,140,260);rg.addColorStop(0,"rgba(253,224,71,.5)");rg.addColorStop(1,"rgba(253,224,71,0)");ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);
+    rg=ctx.createRadialGradient(80,H-260,10,80,H-260,260);rg.addColorStop(0,"rgba(255,255,255,.22)");rg.addColorStop(1,"rgba(255,255,255,0)");ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);
+    ctx.textAlign="left";ctx.fillStyle="#e0f2fe";ctx.font=`700 30px ${S}`;ctx.fillText("SAFIYA SPEAKING",70,90);
+    ctx.fillStyle="rgba(255,255,255,.85)";ctx.font=`600 40px ${S}`;ctx.fillText("I've spoken",70,H-540);
+    ctx.fillStyle="#fde047";ctx.font=`900 230px ${S}`;ctx.fillText(mins,64,H-330);
+    ctx.fillStyle="#fff";ctx.font=`800 66px ${S}`;ctx.fillText("minutes 🎙",70,H-250);
+    roundRect(60,H-170,W-120,110,26);ctx.fillStyle="rgba(255,255,255,.15)";ctx.fill();
+    avatarCircle(120,H-115,40,"#fde047","#1e3a8a");
+    ctx.textAlign="left";ctx.fillStyle="#fff";ctx.font=`700 34px ${S}`;ctx.fillText(name,180,H-120);
+    ctx.fillStyle="#cbd5e1";ctx.font=`500 24px ${S}`;ctx.fillText("t.me/PTC_assistantbot",180,H-85);
+  }
+  else if(style==="pastel"){
+    ctx.fillStyle="#dbeafe";ctx.fillRect(0,0,W,H);
+    ctx.textAlign="left";ctx.fillStyle="#1e40af";ctx.font=`800 34px ${S}`;ctx.fillText("SAFIYA",70,100);
+    avatarCircle(W-110,80,34,"#2563eb","#fff");
+    ctx.fillStyle="#fff";roundRect(70,180,W-140,300,32);ctx.fill();
+    ctx.textAlign="center";ctx.fillStyle="#2563eb";ctx.font=`900 190px ${S}`;ctx.fillText(mins,W/2,410);
+    ctx.fillStyle="#60a5fa";ctx.font=`600 30px ${S}`;ctx.fillText("MINUTES SPOKEN",W/2,460);
+    const bx=[70,W/2+12];const bw=(W-140-24)/2;
+    [["52","CALLS"],["89","LIKES"]].forEach((s,i)=>{ctx.fillStyle="#fff";roundRect(bx[i],520,bw,150,24);ctx.fill();ctx.fillStyle="#1e40af";ctx.font=`800 58px ${S}`;ctx.textAlign="center";ctx.fillText(i===0?String(p.total_calls||0):String(p.likes_received||0),bx[i]+bw/2,595);ctx.fillStyle="#94a3b8";ctx.font=`600 24px ${S}`;ctx.fillText(s[1],bx[i]+bw/2,635);});
+    avatarCircle(120,H-110,40,"#2563eb","#fff");
+    ctx.textAlign="left";ctx.fillStyle="#1e40af";ctx.font=`700 36px ${S}`;ctx.fillText(name,185,H-95);
+  }
+  else if(style==="neon"){
+    ctx.fillStyle="#0a0f2c";ctx.fillRect(0,0,W,H);
+    let rg=ctx.createRadialGradient(W*0.7,H*0.2,10,W*0.7,H*0.2,400);rg.addColorStop(0,"rgba(56,189,248,.35)");rg.addColorStop(1,"rgba(56,189,248,0)");ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);
+    ctx.textAlign="left";ctx.fillStyle="#38bdf8";ctx.font=`700 30px ${S}`;ctx.fillText("SAFIYA SPEAKING",70,90);
+    ctx.fillStyle="#7dd3fc";ctx.font=`600 40px ${S}`;ctx.fillText("I've spoken",70,H-520);
+    const ng=ctx.createLinearGradient(60,0,W-60,0);ng.addColorStop(0,"#38bdf8");ng.addColorStop(1,"#818cf8");ctx.fillStyle=ng;ctx.font=`900 230px ${S}`;ctx.fillText(mins,64,H-300);
+    ctx.fillStyle="#fff";ctx.font=`800 66px ${S}`;ctx.fillText("minutes 🎙",70,H-220);
+    const bx=[60,60+(W-120-16)/3+8,60+2*((W-120-16)/3+8)];const bw=(W-120-16)/3;
+    [[String(p.total_calls||0),"CALLS"],[String(p.likes_received||0),"LIKES"],[String(p.avg_rating||"—"),"RATE"]].forEach((s,i)=>{ctx.strokeStyle="rgba(56,189,248,.4)";ctx.lineWidth=1.5;roundRect(bx[i],H-150,bw,90,14);ctx.stroke();ctx.fillStyle="#38bdf8";ctx.font=`800 40px ${S}`;ctx.textAlign="center";ctx.fillText(s[0],bx[i]+bw/2,H-95);ctx.fillStyle="#64748b";ctx.font=`600 20px ${S}`;ctx.fillText(s[1],bx[i]+bw/2,H-70);});
+  }
+  else if(style==="luxe"){
+    ctx.fillStyle="#f8fafc";ctx.fillRect(0,0,W,H);ctx.strokeStyle="#e2e8f0";ctx.lineWidth=2;ctx.strokeRect(1,1,W-2,H-2);
+    ctx.textAlign="left";ctx.fillStyle="#2563eb";ctx.font=`800 32px ${S}`;ctx.fillText("SAFIYA",70,100);
+    ctx.textAlign="right";ctx.fillStyle="#94a3b8";ctx.font=`600 26px ${S}`;ctx.fillText("SPEAKING",W-70,100);
+    ctx.strokeStyle="#e2e8f0";ctx.beginPath();ctx.moveTo(70,140);ctx.lineTo(W-70,140);ctx.stroke();
+    ctx.textAlign="left";ctx.fillStyle="#94a3b8";ctx.font=`500 34px ${S}`;ctx.fillText("I've spoken",70,H-470);
+    ctx.fillStyle="#0f172a";ctx.font=`800 210px ${S}`;ctx.fillText(mins,66,H-260);
+    const mw=ctx.measureText(mins).width;ctx.fillStyle="#2563eb";ctx.font=`700 54px ${S}`;ctx.fillText("min",70+mw+14,H-260);
+    ctx.fillStyle="#475569";ctx.font=`500 38px ${S}`;ctx.fillText("of English 🎙",70,H-200);
+    ctx.fillStyle="#64748b";ctx.font=`500 28px ${S}`;ctx.fillText(stats,70,H-140);
+    avatarCircle(100,H-75,32,"#2563eb","#fff");
+    ctx.fillStyle="#0f172a";ctx.font=`700 32px ${S}`;ctx.fillText(name,150,H-65);
+  }
+  else if(style==="playful"){
+    ctx.fillStyle="#1e40af";ctx.fillRect(0,0,W,H);ctx.fillStyle="#2563eb";roundRect(16,16,W-32,H-32,30);ctx.fill();
+    ctx.fillStyle="#fde047";roundRect(50,50,300,60,30);ctx.fill();ctx.fillStyle="#1e40af";ctx.font=`800 28px ${S}`;ctx.textAlign="center";ctx.fillText("🔥 SAFIYA SPEAKING",200,90);
+    avatarCircle(W/2,240,60,"#fff","#2563eb");ctx.strokeStyle="#fde047";ctx.lineWidth=5;circle(W/2,240,60);ctx.stroke();
+    ctx.fillStyle="#fff";ctx.font=`800 40px ${S}`;ctx.textAlign="center";ctx.fillText(name,W/2,340);
+    ctx.fillStyle="rgba(255,255,255,.16)";roundRect(60,390,W-120,240,28);ctx.fill();
+    ctx.fillStyle="#fde047";ctx.font=`900 150px ${S}`;ctx.fillText(mins,W/2,560);
+    ctx.fillStyle="#dbeafe";ctx.font=`600 30px ${S}`;ctx.fillText("MINUTES 🎙",W/2,610);
+    ctx.fillStyle="rgba(255,255,255,.16)";roundRect(140,680,180,70,20);ctx.fill();roundRect(400,680,180,70,20);ctx.fill();
+    ctx.fillStyle="#fff";ctx.font=`700 30px ${S}`;ctx.fillText("📞 "+(p.total_calls||0),230,725);ctx.fillText("❤ "+(p.likes_received||0),490,725);
+    ctx.fillStyle="#bfdbfe";ctx.font=`500 24px ${S}`;ctx.fillText("t.me/PTC_assistantbot",W/2,H-70);
+  }
+  else if(style==="diagonal"){
+    ctx.fillStyle="#0f172a";ctx.fillRect(0,0,W,H);
+    ctx.save();ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(W,0);ctx.lineTo(W,H*0.66);ctx.lineTo(0,H*0.82);ctx.closePath();ctx.clip();
+    const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#38bdf8");g.addColorStop(1,"#2563eb");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.restore();
+    ctx.textAlign="left";ctx.fillStyle="#e0f2fe";ctx.font=`700 30px ${S}`;ctx.fillText("SAFIYA SPEAKING",70,90);
+    ctx.fillStyle="rgba(255,255,255,.85)";ctx.font=`600 40px ${S}`;ctx.fillText("I've spoken",70,H-560);
+    ctx.fillStyle="#fff";ctx.font=`900 220px ${S}`;ctx.fillText(mins,64,H-360);
+    ctx.fillStyle="#fde047";ctx.font=`800 60px ${S}`;ctx.fillText("minutes 🎙",70,H-285);
+    avatarCircle(110,H-95,38,"#38bdf8","#0f172a");
+    ctx.textAlign="left";ctx.fillStyle="#fff";ctx.font=`700 34px ${S}`;ctx.fillText(name,170,H-100);
+    ctx.fillStyle="#64748b";ctx.font=`500 24px ${S}`;ctx.fillText(stats,170,H-65);
+  }
+  else if(style==="wave"){
+    ctx.fillStyle="#eff6ff";ctx.fillRect(0,0,W,H);
+    ctx.textAlign="center";ctx.fillStyle="#2563eb";ctx.font=`700 30px ${S}`;ctx.fillText("SAFIYA SPEAKING",W/2,90);
+    avatarCircle(W/2,220,60,"#2563eb","#fff");
+    ctx.fillStyle="#1e40af";ctx.font=`700 40px ${S}`;ctx.fillText(name,W/2,330);
+    ctx.fillStyle="#60a5fa";ctx.font=`500 26px ${S}`;ctx.fillText("Intermediate · ★ 4.8",W/2,370);
+    const wy=H*0.52;const g=ctx.createLinearGradient(0,wy,0,H);g.addColorStop(0,"#3b82f6");g.addColorStop(1,"#2563eb");ctx.fillStyle=g;
+    ctx.beginPath();ctx.moveTo(0,wy+40);ctx.quadraticCurveTo(W/2,wy-40,W,wy+40);ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+    ctx.fillStyle="#fde047";ctx.font=`900 160px ${S}`;ctx.textAlign="center";ctx.fillText(mins,W/2,wy+220);
+    ctx.fillStyle="#dbeafe";ctx.font=`600 30px ${S}`;ctx.fillText("MINUTES OF ENGLISH",W/2,wy+270);
+    ctx.fillStyle="#bfdbfe";ctx.font=`500 28px ${S}`;ctx.fillText(stats,W/2,wy+330);
+    ctx.fillStyle="#93c5fd";ctx.font=`500 24px ${S}`;ctx.fillText("t.me/PTC_assistantbot",W/2,H-60);
+  }
 }
 
 async function saveCardImage(p,tryShare){
@@ -739,11 +832,9 @@ async function saveCardImage(p,tryShare){
   c.toBlob(async(blob)=>{
     if(!blob){if(msg)msg.textContent="Couldn't create image.";return;}
     const file=new File([blob],"safiya-card.png",{type:"image/png"});
-    // try native share (reaches IG stories on most phones)
     if(tryShare&&navigator.canShare&&navigator.canShare({files:[file]})){
       try{await navigator.share({files:[file],text:"I'm practicing English on Safiya Speaking 🎙️ t.me/PTC_assistantbot"});return;}catch(e){}
     }
-    // fallback: download the image
     const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="safiya-card.png";document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
     if(msg)msg.textContent="Saved! Now post it to your story 🎉";

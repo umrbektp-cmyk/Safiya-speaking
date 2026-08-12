@@ -16,7 +16,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
-APP_VERSION    = "19"  # bump on each deploy so clients auto-update
+APP_VERSION    = "20"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
