@@ -16,7 +16,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
-APP_VERSION    = "18"  # bump on each deploy so clients auto-update
+APP_VERSION    = "19"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -79,7 +79,7 @@ from scenarios import SCENARIOS
 import random
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(DATABASE_URL, connect_timeout=5, options='-c statement_timeout=8000')
 
 def _run(sql, params=None):
     """Run one statement in its own connection so a failure can't poison others."""
@@ -1136,7 +1136,14 @@ def _reaper():
 def index():
     return send_from_directory(".", "index.html")
 
-init_db()
+def _safe_init():
+    try:
+        init_db()
+    except Exception as e:
+        print("init_db failed (will retry lazily):", str(e)[:150])
+
+# Run init_db in a background thread so a slow DB can't block the web server from booting.
+threading.Thread(target=_safe_init, daemon=True).start()
 threading.Thread(target=_reaper, daemon=True).start()
 threading.Thread(target=_reminder_loop, daemon=True).start()
 
