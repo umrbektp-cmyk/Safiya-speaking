@@ -15,19 +15,25 @@ DATABASE_URL   = os.environ.get("DATABASE_URL", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
-BTN_URL        = MINIAPP_URL or APP_URL  # prefer mini app link for buttons
-APP_VERSION    = "20"  # bump on each deploy so clients auto-update
+BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
+APP_VERSION    = "21"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
 def tg_send(chat_id, text, button_text=None, button_url=None):
-    """Send a Telegram message via the bot. Silent no-op if token missing."""
+    """Send a Telegram message via the bot. Silent no-op if token missing.
+    If the button URL is our own https app URL (not a t.me link), send it as a
+    web_app button so it opens the mini app INSIDE Telegram instead of a browser."""
     if not TELEGRAM_TOKEN or not chat_id or str(chat_id).startswith("guest"):
         return
     try:
         payload = {"chat_id": str(chat_id), "text": text}
         if button_text and button_url:
-            payload["reply_markup"] = _json.dumps({"inline_keyboard": [[{"text": button_text, "url": button_url}]]})
+            if button_url.startswith("https://") and "t.me/" not in button_url:
+                btn = {"text": button_text, "web_app": {"url": button_url}}
+            else:
+                btn = {"text": button_text, "url": button_url}
+            payload["reply_markup"] = _json.dumps({"inline_keyboard": [[btn]]})
         data = urllib.parse.urlencode(payload).encode()
         req = urllib.request.Request(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data=data)
         urllib.request.urlopen(req, timeout=5).read()
