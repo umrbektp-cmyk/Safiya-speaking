@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "22"  # bump on each deploy so clients auto-update
+APP_VERSION    = "23"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -1088,10 +1088,10 @@ def ep_migrate():
         return jsonify(ok=False, error="need DATABASE_URL and NEW_DATABASE_URL"), 400
     report = {}
     try:
-        src = psycopg2.connect(DATABASE_URL, connect_timeout=15)
-        dst = psycopg2.connect(NEW_DATABASE_URL, connect_timeout=15)
+        src = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+        dst = psycopg2.connect(NEW_DATABASE_URL, connect_timeout=10)
     except Exception as e:
-        return jsonify(ok=False, error="connect failed: "+str(e)[:200]), 500
+        return jsonify(ok=False, error="connect failed: "+str(e)[:250]), 500
     try:
         _migrate_schema(dst)
         for tbl in _MIGRATE_TABLES:
