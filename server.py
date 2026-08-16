@@ -12,11 +12,12 @@ LIVEKIT_URL    = os.environ.get("LIVEKIT_URL", "")
 LIVEKIT_KEY    = os.environ.get("LIVEKIT_KEY", "")
 LIVEKIT_SECRET = os.environ.get("LIVEKIT_SECRET", "")
 DATABASE_URL   = os.environ.get("DATABASE_URL", "")
+NEW_DATABASE_URL = os.environ.get("NEW_DATABASE_URL", "")  # temp: destination DB for one-time migration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "21"  # bump on each deploy so clients auto-update
+APP_VERSION    = "22"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -1039,6 +1040,108 @@ def ep_review_moderate():
 @app.route("/version", methods=["GET","POST"])
 def ep_version():
     return jsonify(version=APP_VERSION)
+
+# ─── ONE-TIME DB MIGRATION (Railway -> Render). Remove after use. ─────────────
+# Copies all sp_* tables from DATABASE_URL (source) into NEW_DATABASE_URL (dest).
+# Trigger by visiting /migrate?key=safiya-move-2026 once. Safe to run more than
+# once: it recreates the schema and replaces rows (dest is overwritten each run).
+_MIGRATE_TABLES = ["sp_users","sp_calls","sp_follows","sp_messages","sp_follow_reqs",
+                   "sp_notifs","sp_reviews","sp_kudos","sp_pair_time"]
+
+def _migrate_schema(dest_conn):
+    """Create the same tables in the destination DB."""
+    stmts = [
+        """CREATE TABLE IF NOT EXISTS sp_users (
+            uid TEXT PRIMARY KEY, name TEXT, photo_url TEXT, level TEXT DEFAULT 'beginner', bio TEXT DEFAULT '',
+            total_seconds INTEGER DEFAULT 0, total_calls INTEGER DEFAULT 0, likes_received INTEGER DEFAULT 0,
+            rating_sum INTEGER DEFAULT 0, rating_count INTEGER DEFAULT 0, last_seen DOUBLE PRECISION DEFAULT 0, joined TEXT)""",
+        """CREATE TABLE IF NOT EXISTS sp_calls (
+            id SERIAL PRIMARY KEY, uid TEXT, partner_uid TEXT, partner_name TEXT,
+            seconds INTEGER DEFAULT 0, level TEXT, ended_at TEXT)""",
+        """CREATE TABLE IF NOT EXISTS sp_follows (
+            follower TEXT, following TEXT, created TEXT, PRIMARY KEY (follower, following))""",
+        """CREATE TABLE IF NOT EXISTS sp_messages (
+            id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, text TEXT, created TEXT, ts DOUBLE PRECISION)""",
+        """CREATE TABLE IF NOT EXISTS sp_follow_reqs (
+            follower TEXT, following TEXT, created TEXT, PRIMARY KEY (follower, following))""",
+        """CREATE TABLE IF NOT EXISTS sp_notifs (
+            id SERIAL PRIMARY KEY, uid TEXT, kind TEXT, from_uid TEXT, from_name TEXT, from_photo TEXT,
+            extra TEXT, seen INTEGER DEFAULT 0, ts DOUBLE PRECISION, created TEXT)""",
+        """CREATE TABLE IF NOT EXISTS sp_reviews (
+            id SERIAL PRIMARY KEY, uid TEXT, name TEXT, photo_url TEXT, stars INTEGER, text TEXT,
+            status TEXT DEFAULT 'pending', ts DOUBLE PRECISION, created TEXT)""",
+        """CREATE TABLE IF NOT EXISTS sp_kudos (
+            id SERIAL PRIMARY KEY, uid TEXT, from_uid TEXT, tag TEXT, ts DOUBLE PRECISION)""",
+        """CREATE TABLE IF NOT EXISTS sp_pair_time (
+            a TEXT, b TEXT, seconds INTEGER DEFAULT 0, week TEXT, PRIMARY KEY (a,b,week))""",
+    ]
+    with dest_conn.cursor() as cur:
+        for s in stmts:
+            cur.execute(s)
+    dest_conn.commit()
+
+@app.route("/migrate")
+def ep_migrate():
+    if request.args.get("key") != "safiya-move-2026":
+        return jsonify(ok=False, error="bad key"), 403
+    if not DATABASE_URL or not NEW_DATABASE_URL:
+        return jsonify(ok=False, error="need DATABASE_URL and NEW_DATABASE_URL"), 400
+    report = {}
+    try:
+        src = psycopg2.connect(DATABASE_URL, connect_timeout=15)
+        dst = psycopg2.connect(NEW_DATABASE_URL, connect_timeout=15)
+    except Exception as e:
+        return jsonify(ok=False, error="connect failed: "+str(e)[:200]), 500
+    try:
+        _migrate_schema(dst)
+        for tbl in _MIGRATE_TABLES:
+            # read all rows + column names from source
+            with src.cursor() as scur:
+                scur.execute(f"SELECT * FROM {tbl}")
+                rows = scur.fetchall()
+                cols = [c[0] for c in scur.description]
+            # wipe dest table then insert
+            with dst.cursor() as dcur:
+                dcur.execute(f"TRUNCATE {tbl}")
+                if rows:
+                    collist = ",".join(cols)
+                    ph = ",".join(["%s"]*len(cols))
+                    dcur.executemany(f"INSERT INTO {tbl} ({collist}) VALUES ({ph})", rows)
+            dst.commit()
+            report[tbl] = len(rows)
+        # fix SERIAL sequences so new inserts don't collide with copied ids
+        with dst.cursor() as dcur:
+            for tbl in ["sp_calls","sp_messages","sp_notifs","sp_reviews","sp_kudos"]:
+                dcur.execute(f"SELECT setval(pg_get_serial_sequence('{tbl}','id'), COALESCE((SELECT MAX(id) FROM {tbl}),1))")
+        dst.commit()
+        return jsonify(ok=True, copied=report)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)[:300], partial=report), 500
+    finally:
+        try: src.close()
+        except: pass
+        try: dst.close()
+        except: pass
+
+@app.route("/migrate_verify")
+def ep_migrate_verify():
+    """Compare row counts between source and dest for peace of mind."""
+    if request.args.get("key") != "safiya-move-2026":
+        return jsonify(ok=False, error="bad key"), 403
+    out = {}
+    try:
+        src = psycopg2.connect(DATABASE_URL, connect_timeout=15)
+        dst = psycopg2.connect(NEW_DATABASE_URL, connect_timeout=15)
+        for tbl in _MIGRATE_TABLES:
+            with src.cursor() as c:
+                c.execute(f"SELECT COUNT(*) FROM {tbl}"); s = c.fetchone()[0]
+            with dst.cursor() as c:
+                c.execute(f"SELECT COUNT(*) FROM {tbl}"); d = c.fetchone()[0]
+            out[tbl] = {"railway": s, "render": d, "match": s == d}
+        src.close(); dst.close()
+        return jsonify(ok=True, tables=out)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)[:300]), 500
 
 # ─── Telegram webhook (handles admin Approve/Reject taps on reviews) ──────────
 @app.route("/tg_webhook", methods=["POST"])
