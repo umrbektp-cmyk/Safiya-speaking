@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "23"  # bump on each deploy so clients auto-update
+APP_VERSION    = "24"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -82,11 +82,59 @@ def make_token(identity, name, room):
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 from scenarios import SCENARIOS
 import random
 
+# ─── Connection pool ─────────────────────────────────────────────────────────
+# Reuse a small set of DB connections instead of opening a new one per request.
+# Opening a fresh connection on every request was starving the single gunicorn
+# worker under load (the "works 2 min then hangs" loop). The pool caps
+# concurrent connections and hands them back for reuse.
+_pool = None
+_pool_lock = threading.Lock()
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = ThreadedConnectionPool(
+                    minconn=1, maxconn=8, dsn=DATABASE_URL,
+                    connect_timeout=5, options='-c statement_timeout=8000')
+    return _pool
+
+class _PooledConn:
+    """Wraps a pooled connection so .close() RETURNS it to the pool instead of
+    really closing it, and so `with get_db() as conn:` also returns it on exit.
+    Lets both existing patterns work unchanged with no call-site edits."""
+    def __init__(self, conn):
+        self._conn = conn
+        self._returned = False
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+    def close(self):
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            _get_pool().putconn(self._conn)
+        except Exception:
+            try: self._conn.close()
+            except Exception: pass
+    def __enter__(self):
+        self._conn.__enter__()
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self._conn.__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+        return False
+
 def get_db():
-    return psycopg2.connect(DATABASE_URL, connect_timeout=5, options='-c statement_timeout=8000')
+    conn = _get_pool().getconn()
+    return _PooledConn(conn)
 
 def _run(sql, params=None):
     """Run one statement in its own connection so a failure can't poison others."""
