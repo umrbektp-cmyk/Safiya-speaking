@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "25"  # bump on each deploy so clients auto-update
+APP_VERSION    = "26"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -82,78 +82,35 @@ def make_token(identity, name, room):
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
 from scenarios import SCENARIOS
 import random
 
-# ─── Connection pool (boot-safe) ─────────────────────────────────────────────
-# Reuse a small set of DB connections instead of opening a new one per request.
-# Opening a fresh connection on every request was starving the single gunicorn
-# worker (the "works 2 min then hangs" loop). IMPORTANT: the pool is built in a
-# BACKGROUND thread at startup and get_db() NEVER blocks waiting for it — if the
-# pool isn't ready yet (or failed), we fall back to a direct connection. This
-# prevents a slow pool init from freezing the worker (which took the app fully
-# down in the first pool attempt).
-_pool = None
-_pool_ready = False
-
-def _build_pool():
-    global _pool, _pool_ready
-    try:
-        _pool = ThreadedConnectionPool(
-            minconn=1, maxconn=8, dsn=DATABASE_URL,
-            connect_timeout=5, options='-c statement_timeout=8000')
-        _pool_ready = True
-        print("connection pool ready")
-    except Exception as e:
-        _pool = None; _pool_ready = False
-        print("pool init failed (using direct connections):", str(e)[:150])
-
-def _direct_conn():
-    return psycopg2.connect(DATABASE_URL, connect_timeout=5,
-                            options='-c statement_timeout=8000')
-
-class _PooledConn:
-    """Wraps a connection so .close() returns it to the pool (or really closes a
-    direct-fallback connection), and `with get_db() as conn:` returns it on exit.
-    Both existing usage patterns work unchanged — no call-site edits."""
-    def __init__(self, conn, pooled):
-        self._conn = conn
-        self._pooled = pooled
-        self._returned = False
-    def __getattr__(self, name):
-        return getattr(self._conn, name)
-    def close(self):
-        if self._returned:
-            return
-        self._returned = True
-        try:
-            if self._pooled and _pool is not None:
-                _pool.putconn(self._conn)
-            else:
-                self._conn.close()
-        except Exception:
-            try: self._conn.close()
-            except Exception: pass
-    def __enter__(self):
-        self._conn.__enter__()
-        return self
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            self._conn.__exit__(exc_type, exc, tb)
-        finally:
-            self.close()
-        return False
+# ─── DB connections (keepalive-hardened, no pool) ────────────────────────────
+# The worker was freezing silently (~2 min under load) while using almost no
+# CPU/RAM — the Render metrics ruled out resource exhaustion. That signature is
+# a thread BLOCKED on a dead DB connection that never returns: the Frankfurt DB
+# link goes half-open, psycopg2 waits forever, and eventually all threads block
+# and the worker goes silent (no crash, so Render never restarts it).
+#
+# Fix: open plain direct connections (no pool — pooling hung the boot here), but
+# harden every connection so a dead/stalled link is detected and dropped fast
+# instead of blocking a thread forever:
+#   - connect_timeout: cap the initial connect
+#   - statement_timeout: cap any single query (server-side)
+#   - TCP keepalives: OS probes the socket; a dead peer is detected in ~15-30s
+#     and the blocked recv() raises instead of hanging indefinitely
+_CONN_KW = dict(
+    connect_timeout=5,
+    options='-c statement_timeout=8000',
+    keepalives=1,
+    keepalives_idle=10,
+    keepalives_interval=5,
+    keepalives_count=3,
+)
 
 def get_db():
-    # Use the pool if it's ready; otherwise fall back to a direct connection.
-    # Never block on pool creation — that was what froze the worker before.
-    if _pool_ready and _pool is not None:
-        try:
-            return _PooledConn(_pool.getconn(), pooled=True)
-        except Exception:
-            pass  # pool exhausted or broken -> fall through to direct
-    return _PooledConn(_direct_conn(), pooled=False)
+    return psycopg2.connect(DATABASE_URL, **_CONN_KW)
+
 
 def _run(sql, params=None):
     """Run one statement in its own connection so a failure can't poison others."""
@@ -1318,8 +1275,6 @@ def _safe_init():
     except Exception as e:
         print("init_db failed (will retry lazily):", str(e)[:150])
 
-# Build the DB connection pool in the background so a slow connect can't block boot.
-threading.Thread(target=_build_pool, daemon=True).start()
 # Run init_db in a background thread so a slow DB can't block the web server from booting.
 threading.Thread(target=_safe_init, daemon=True).start()
 threading.Thread(target=_reaper, daemon=True).start()
