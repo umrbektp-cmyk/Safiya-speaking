@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "26"  # bump on each deploy so clients auto-update
+APP_VERSION    = "27"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -1278,7 +1278,8 @@ def _safe_init():
 # Run init_db in a background thread so a slow DB can't block the web server from booting.
 threading.Thread(target=_safe_init, daemon=True).start()
 threading.Thread(target=_reaper, daemon=True).start()
-threading.Thread(target=_reminder_loop, daemon=True).start()
+# DISABLED: reminder invitations paused while the app is being stabilized.
+# threading.Thread(target=_reminder_loop, daemon=True).start()
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
