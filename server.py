@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "30"  # bump on each deploy so clients auto-update
+APP_VERSION    = "31"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -163,13 +163,30 @@ class _PooledConn:
             self.close()
         return False
 
+def _alive(conn):
+    """Quick check that a connection is usable; dead half-open links fail here."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
 def get_db():
     pool = _ensure_pool()
     if pool is not None:
-        try:
-            return _PooledConn(pool.getconn(), pooled=True)
-        except Exception:
-            pass  # pool exhausted/broken -> fall back to a direct connection
+        for _ in range(3):  # try up to 3 pooled connections, dropping dead ones
+            try:
+                raw = pool.getconn()
+            except Exception:
+                break  # pool exhausted/broken -> fall back to direct
+            if _alive(raw):
+                return _PooledConn(raw, pooled=True)
+            # dead connection: discard it from the pool entirely, try another
+            try: pool.putconn(raw, close=True)
+            except Exception:
+                try: raw.close()
+                except Exception: pass
     return _PooledConn(_direct_conn(), pooled=False)
 
 
