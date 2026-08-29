@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "28"  # bump on each deploy so clients auto-update
+APP_VERSION    = "29"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -121,8 +121,8 @@ def _ensure_pool():
         if _pool is not None or _pool_failed:
             return _pool
         try:
-            _pool = ThreadedConnectionPool(minconn=1, maxconn=5, dsn=DATABASE_URL, **_CONN_KW)
-            print("connection pool ready (max 5)")
+            _pool = ThreadedConnectionPool(minconn=2, maxconn=20, dsn=DATABASE_URL, **_CONN_KW)
+            print("connection pool ready (max 20)")
         except Exception as e:
             _pool_failed = True
             print("pool init failed, using direct connections:", str(e)[:150])
