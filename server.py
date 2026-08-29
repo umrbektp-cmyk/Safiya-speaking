@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "27"  # bump on each deploy so clients auto-update
+APP_VERSION    = "28"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -82,23 +82,23 @@ def make_token(identity, name, room):
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 from scenarios import SCENARIOS
 import random
 
-# ─── DB connections (keepalive-hardened, no pool) ────────────────────────────
-# The worker was freezing silently (~2 min under load) while using almost no
-# CPU/RAM — the Render metrics ruled out resource exhaustion. That signature is
-# a thread BLOCKED on a dead DB connection that never returns: the Frankfurt DB
-# link goes half-open, psycopg2 waits forever, and eventually all threads block
-# and the worker goes silent (no crash, so Render never restarts it).
+# ─── DB connections: shared pool (fixes the CONCURRENCY crash) ───────────────
+# ROOT CAUSE (found Aug 23): the app 50x'd the moment a CLASS of students used it
+# at once — not time-based. Each request opened a FRESH connection to the
+# Frankfurt DB; a class hitting simultaneously exhausted the Postgres
+# max-connection cap and stalled every worker thread → 502/503/504.
 #
-# Fix: open plain direct connections (no pool — pooling hung the boot here), but
-# harden every connection so a dead/stalled link is detected and dropped fast
-# instead of blocking a thread forever:
-#   - connect_timeout: cap the initial connect
-#   - statement_timeout: cap any single query (server-side)
-#   - TCP keepalives: OS probes the socket; a dead peer is detected in ~15-30s
-#     and the blocked recv() raises instead of hanging indefinitely
+# FIX: a small SHARED pool so many concurrent requests reuse a few connections
+# instead of one-per-request. Capped at 5 (safe under any Render Postgres tier's
+# connection limit). Hardened so it CANNOT repeat the earlier boot hangs:
+#   - pool is created LAZILY on first use inside a lock+try (never at import)
+#   - if the pool can't be built or is exhausted, we FALL BACK to a direct
+#     connection so the app keeps working instead of freezing
+#   - every connection keeps the keepalive/timeout hardening from before
 _CONN_KW = dict(
     connect_timeout=5,
     options='-c statement_timeout=8000',
@@ -108,8 +108,69 @@ _CONN_KW = dict(
     keepalives_count=3,
 )
 
-def get_db():
+_pool = None
+_pool_failed = False
+_pool_lock = threading.Lock()
+
+def _ensure_pool():
+    """Create the pool once, lazily. Returns the pool or None (fall back to direct)."""
+    global _pool, _pool_failed
+    if _pool is not None or _pool_failed:
+        return _pool
+    with _pool_lock:
+        if _pool is not None or _pool_failed:
+            return _pool
+        try:
+            _pool = ThreadedConnectionPool(minconn=1, maxconn=5, dsn=DATABASE_URL, **_CONN_KW)
+            print("connection pool ready (max 5)")
+        except Exception as e:
+            _pool_failed = True
+            print("pool init failed, using direct connections:", str(e)[:150])
+    return _pool
+
+def _direct_conn():
     return psycopg2.connect(DATABASE_URL, **_CONN_KW)
+
+class _PooledConn:
+    """Wrapper so .close() returns the connection to the pool (or really closes a
+    direct fallback), and `with get_db() as conn:` returns it on exit. Both usage
+    patterns in the code work unchanged — no call-site edits."""
+    def __init__(self, conn, pooled):
+        self._conn = conn
+        self._pooled = pooled
+        self._returned = False
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+    def close(self):
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            if self._pooled and _pool is not None:
+                _pool.putconn(self._conn)
+            else:
+                self._conn.close()
+        except Exception:
+            try: self._conn.close()
+            except Exception: pass
+    def __enter__(self):
+        self._conn.__enter__()
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self._conn.__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+        return False
+
+def get_db():
+    pool = _ensure_pool()
+    if pool is not None:
+        try:
+            return _PooledConn(pool.getconn(), pooled=True)
+        except Exception:
+            pass  # pool exhausted/broken -> fall back to a direct connection
+    return _PooledConn(_direct_conn(), pooled=False)
 
 
 def _run(sql, params=None):
