@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 APP_URL        = os.environ.get("APP_URL", "")  # public URL of this app
 MINIAPP_URL    = os.environ.get("MINIAPP_URL", "")  # t.me/bot/app deep link (opens inside Telegram)
 BTN_URL        = APP_URL or MINIAPP_URL  # prefer https web URL so buttons open the mini app in-Telegram
-APP_VERSION    = "29"  # bump on each deploy so clients auto-update
+APP_VERSION    = "30"  # bump on each deploy so clients auto-update
 
 import urllib.request, urllib.parse, json as _json
 
@@ -257,6 +257,14 @@ def init_db():
         id SERIAL PRIMARY KEY, uid TEXT, from_uid TEXT, tag TEXT, ts DOUBLE PRECISION)""")
     _run("""CREATE TABLE IF NOT EXISTS sp_pair_time (
         a TEXT, b TEXT, seconds INTEGER DEFAULT 0, week TEXT, PRIMARY KEY (a,b,week))""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_waiting (
+        uid TEXT PRIMARY KEY, data TEXT, ts DOUBLE PRECISION)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_matches (
+        uid TEXT PRIMARY KEY, data TEXT, ts DOUBLE PRECISION)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_reqs (
+        uid TEXT PRIMARY KEY, data TEXT, ts DOUBLE PRECISION)""")
+    _run("""CREATE TABLE IF NOT EXISTS sp_recent (
+        a TEXT, b TEXT, ts DOUBLE PRECISION, PRIMARY KEY(a,b))""")
     print("init_db complete")
 
 def upsert_user(uid, name, photo_url, level=None):
@@ -318,7 +326,7 @@ def record_seconds_delta(uid, new_total_seconds):
         already = m.get("recorded_seconds", 0)
         delta = int(new_total_seconds) - already
         if delta <= 0: return
-        m["recorded_seconds"] = int(new_total_seconds)
+        m["recorded_seconds"] = int(new_total_seconds); matches[uid] = m
     conn = get_db()
     try:
         with conn.cursor() as cur:
@@ -337,7 +345,8 @@ def finalize_call_log(uid, partner_uid, partner_name, level):
         m = matches.get(uid) or {}
         secs = m.get("recorded_seconds", 0)
         if m.get("logged"): return
-        if uid in matches: matches[uid]["logged"] = True
+        if uid in matches:
+            m["logged"] = True; matches[uid] = m
     if secs < 3: return
     conn = get_db()
     try:
@@ -698,23 +707,116 @@ def delete_message(mid):
     _run("DELETE FROM sp_messages WHERE id=%s",(int(mid),))
 
 
-# ─── In-memory matchmaking + call requests ──────────────────────────────────
-waiting = []          # list of {uid,name,photo,level,only_level,ts}
-matches = {}          # uid -> {partner_uid,partner_name,partner_photo,partner_level,room,ts}
-recent  = {}
-requests_in = {}      # target_uid -> {from_uid,from_name,from_photo,from_level,room,ts}
-lock = threading.Lock()
+# ─── DB-backed matchmaking (shared across workers) ───────────────────────────
+# Matchmaking state used to live in this process's memory (matches/waiting/
+# requests_in dicts). That only works with ONE worker — with multiple workers
+# each has its own memory, so paired users on different workers can't see each
+# other. Render support confirmed the app needs more workers to handle class
+# load. So we move this state into the DATABASE via dict-like shims that support
+# the SAME operations the code already uses ([], .get, .pop, `in`, .keys, iter),
+# letting all call sites stay unchanged while state is now shared across workers.
+import json as _mmjson
+
 MATCH_TTL = 600; RECENT_TTL = 8; REQ_TTL = 60
 
+class _DBDict:
+    """Dict-like store backed by a DB table (uid PRIMARY KEY, data JSON, ts).
+    Supports d[k], d.get(k), d[k]=v, d.pop(k), k in d, d.keys(), iter(d)."""
+    def __init__(self, table): self.t = table
+    def __setitem__(self, k, v):
+        js = _mmjson.dumps(v); ts = v.get("ts", time.time()) if isinstance(v, dict) else time.time()
+        _run(f"INSERT INTO {self.t} (uid,data,ts) VALUES (%s,%s,%s) "
+             f"ON CONFLICT (uid) DO UPDATE SET data=EXCLUDED.data, ts=EXCLUDED.ts", (str(k), js, ts))
+    def get(self, k, default=None):
+        conn=get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT data FROM {self.t} WHERE uid=%s", (str(k),))
+                r=cur.fetchone()
+                return _mmjson.loads(r[0]) if r else default
+        except Exception: return default
+        finally: conn.close()
+    def __getitem__(self, k):
+        v=self.get(k, None)
+        if v is None: raise KeyError(k)
+        return v
+    def __contains__(self, k):
+        conn=get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT 1 FROM {self.t} WHERE uid=%s", (str(k),))
+                return cur.fetchone() is not None
+        except Exception: return False
+        finally: conn.close()
+    def pop(self, k, default=None):
+        v=self.get(k, default)
+        _run(f"DELETE FROM {self.t} WHERE uid=%s", (str(k),))
+        return v
+    def keys(self):
+        conn=get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT uid FROM {self.t}")
+                return [row[0] for row in cur.fetchall()]
+        except Exception: return []
+        finally: conn.close()
+    def __iter__(self): return iter(self.keys())
+
+class _WaitingList:
+    """List-like waiting queue backed by sp_waiting. Supports append, remove,
+    iteration, len — matching how the code uses `waiting`."""
+    def _all(self):
+        conn=get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM sp_waiting ORDER BY ts ASC")
+                return [_mmjson.loads(r[0]) for r in cur.fetchall()]
+        except Exception: return []
+        finally: conn.close()
+    def append(self, item):
+        _run("INSERT INTO sp_waiting (uid,data,ts) VALUES (%s,%s,%s) "
+             "ON CONFLICT (uid) DO UPDATE SET data=EXCLUDED.data, ts=EXCLUDED.ts",
+             (str(item["uid"]), _mmjson.dumps(item), item.get("ts", time.time())))
+    def remove(self, item):
+        _run("DELETE FROM sp_waiting WHERE uid=%s", (str(item["uid"]),))
+    def __iter__(self): return iter(self._all())
+    def __len__(self):
+        conn=get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM sp_waiting")
+                return cur.fetchone()[0]
+        except Exception: return 0
+        finally: conn.close()
+
+waiting = _WaitingList()
+matches = _DBDict("sp_matches")
+requests_in = _DBDict("sp_reqs")
+
+class _DummyLock:
+    """Locking is now handled by the database (atomic upserts/deletes), so the
+    in-process lock is a no-op. Kept so `with lock:` blocks still work."""
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+lock = _DummyLock()
+
 def _clean(uid):
-    global waiting
-    waiting = [w for w in waiting if w["uid"] != uid]
+    _run("DELETE FROM sp_waiting WHERE uid=%s", (str(uid),))
 
 def _remember(a,b):
-    now=time.time(); recent.setdefault(a,{})[b]=now; recent.setdefault(b,{})[a]=now
+    now=time.time()
+    _run("INSERT INTO sp_recent (a,b,ts) VALUES (%s,%s,%s) ON CONFLICT (a,b) DO UPDATE SET ts=EXCLUDED.ts",(str(a),str(b),now))
+    _run("INSERT INTO sp_recent (a,b,ts) VALUES (%s,%s,%s) ON CONFLICT (a,b) DO UPDATE SET ts=EXCLUDED.ts",(str(b),str(a),now))
 
 def _recently(a,b):
-    return b in recent.get(a,{}) and (time.time()-recent[a][b])<RECENT_TTL
+    conn=get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT ts FROM sp_recent WHERE a=%s AND b=%s",(str(a),str(b)))
+            r=cur.fetchone()
+            return bool(r) and (time.time()-r[0])<RECENT_TTL
+    except Exception: return False
+    finally: conn.close()
 
 def _make_match(u1, u2, room=None, mode="free", scenario=None):
     """u1,u2 are dicts with uid,name,photo,level. Returns room."""
@@ -790,7 +892,8 @@ def status():
     d=request.get_json(force=True); uid=str(d.get("uid","")).strip()
     secs=d.get("seconds")
     with lock:
-        if uid in matches: matches[uid]["last_hb"]=time.time()
+        m = matches.get(uid)
+        if m: m["last_hb"]=time.time(); matches[uid]=m
     # Save minutes LIVE during the call (heartbeat) so nothing is lost if the app closes/drops
     if secs is not None:
         try: record_seconds_delta(uid, int(secs))
@@ -1309,21 +1412,22 @@ def _reaper():
     while True:
         time.sleep(30); now=time.time()
         to_finalize=[]
-        with lock:
-            for uid in list(matches.keys()):
-                m=matches[uid]
-                last_hb=m.get("last_hb", m.get("ts", now))
-                # call is dead if TTL exceeded OR no heartbeat for 90s (app closed/dropped)
-                if now-m["ts"]>MATCH_TTL or now-last_hb>90:
-                    to_finalize.append((uid, m.get("partner_uid",""), m.get("partner_name",""), m.get("partner_level","")))
-            for t in list(requests_in.keys()):
-                if now-requests_in[t]["ts"]>REQ_TTL: requests_in.pop(t,None)
-            globals()["waiting"]=[w for w in waiting if now-w["ts"]<300]
-        # finalize outside the lock (finalize_call_log takes the lock itself)
+        for uid in list(matches.keys()):
+            m=matches.get(uid)
+            if not m: continue
+            last_hb=m.get("last_hb", m.get("ts", now))
+            # call is dead if TTL exceeded OR no heartbeat for 90s (app closed/dropped)
+            if now-m["ts"]>MATCH_TTL or now-last_hb>90:
+                to_finalize.append((uid, m.get("partner_uid",""), m.get("partner_name",""), m.get("partner_level","")))
+        for t in list(requests_in.keys()):
+            r=requests_in.get(t)
+            if r and now-r["ts"]>REQ_TTL: requests_in.pop(t,None)
+        # expire stale waiting entries + old recent marks
+        _run("DELETE FROM sp_waiting WHERE ts < %s", (now-300,))
+        _run("DELETE FROM sp_recent WHERE ts < %s", (now-3600,))
         for uid,puid,pname,plvl in to_finalize:
             finalize_call_log(uid,puid,pname,plvl)
-            with lock:
-                matches.pop(uid,None)
+            matches.pop(uid,None)
 
 
 @app.route("/")
